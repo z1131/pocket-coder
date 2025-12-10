@@ -185,11 +185,15 @@ export function usePocketWS(options: UsePocketWSOptions) {
     };
 
     ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        handleIncoming(msg);
-      } catch (err) {
-        console.error('无法解析 WebSocket 消息', err);
+      // 服务器可能会把多条消息用换行符合并发送
+      const messages = event.data.split('\n').filter((s: string) => s.trim());
+      for (const msgStr of messages) {
+        try {
+          const msg = JSON.parse(msgStr);
+          handleIncoming(msg);
+        } catch (err) {
+          console.error('无法解析 WebSocket 消息', msgStr, err);
+        }
       }
     };
   }, [disconnect, scheduleReconnect, token, handleIncoming]);

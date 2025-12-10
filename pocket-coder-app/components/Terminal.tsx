@@ -179,6 +179,7 @@ const Terminal: React.FC<TerminalProps> = ({ onData, onResize, output }) => {
         position: 'relative',
       }}
       onClick={handleContainerClick}
+      onTouchStart={handleContainerClick}
     >
       {/* 隐藏的输入框，用于捕获移动端键盘输入 */}
       <input
@@ -196,11 +197,10 @@ const Terminal: React.FC<TerminalProps> = ({ onData, onResize, output }) => {
           position: 'absolute',
           top: 0,
           left: 0,
-          width: '100%',
-          height: '100%',
+          width: '1px',
+          height: '1px',
           opacity: 0,
-          zIndex: 10,
-          caretColor: 'transparent',
+          zIndex: -1,
           border: 'none',
           outline: 'none',
           padding: 0,
