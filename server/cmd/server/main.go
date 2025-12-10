@@ -221,6 +221,8 @@ func registerRoutes(
 	{
 		auth.POST("/register", authHandler.Register)
 		auth.POST("/login", authHandler.Login)
+		auth.POST("/refresh", authHandler.RefreshToken)              // 刷新 Token
+		auth.POST("/logout", authHandler.Logout)                      // 登出
 		auth.POST("/device/code", authHandler.RequestDeviceCode)
 		auth.GET("/device/status", authHandler.GetDeviceStatus)
 		auth.POST("/device/authorize", authHandler.AuthorizeDevice)

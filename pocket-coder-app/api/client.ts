@@ -65,3 +65,25 @@ export async function renameDesktop(id: number, name: string, token: string): Pr
     body: JSON.stringify({ name }),
   }, token);
 }
+
+// 刷新 Token 响应类型
+export type RefreshTokenResponse = {
+  access_token: string;
+  expires_in: number;
+};
+
+// 刷新 Access Token
+export async function refreshAccessToken(refreshToken: string): Promise<RefreshTokenResponse> {
+  console.log('[API] 开始刷新 Access Token...');
+  try {
+    const result = await request<RefreshTokenResponse>('/api/v1/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    console.log('[API] Access Token 刷新成功');
+    return result;
+  } catch (error) {
+    console.error('[API] Access Token 刷新失败:', error);
+    throw error;
+  }
+}
