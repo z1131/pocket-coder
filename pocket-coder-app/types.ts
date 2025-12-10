@@ -35,6 +35,7 @@ export type PocketEvent =
   | { kind: 'agent-response'; sessionId: number; content: string; role: string }
   | { kind: 'agent-status'; status: string; sessionId?: number }
   | { kind: 'terminal:output'; data: string }
+  | { kind: 'terminal:history'; data: string }
   | { kind: 'terminal:exit'; code: number }
   | { kind: 'error'; code: number; message: string }
   | { kind: 'pong' };

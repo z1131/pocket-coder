@@ -496,3 +496,83 @@ func (c *RedisCache) SubscribeDesktopStatus(ctx context.Context) *redis.PubSub {
 func (c *RedisCache) Ping(ctx context.Context) error {
 	return c.client.Ping(ctx).Err()
 }
+
+// ==================== 终端历史记录 ====================
+// 用于存储和获取终端输出历史，支持页面刷新后恢复
+
+const (
+	// 终端历史最大长度（128KB）
+	MaxTerminalHistorySize = 128 * 1024
+	// 终端历史过期时间（24小时）
+	TerminalHistoryTTL = 24 * time.Hour
+)
+
+// AppendTerminalHistory 追加终端历史记录
+// 参数:
+//   - ctx: 上下文
+//   - desktopID: 设备ID
+//   - data: 新的终端输出数据（原始二进制）
+//
+// 返回:
+//   - error: Redis 操作错误
+func (c *RedisCache) AppendTerminalHistory(ctx context.Context, desktopID int64, data []byte) error {
+	key := fmt.Sprintf("terminal:history:%d", desktopID)
+	
+	// 追加数据到现有值
+	_, err := c.client.Append(ctx, key, string(data)).Result()
+	if err != nil {
+		return err
+	}
+	
+	// 检查长度，如果超过限制则截断
+	length, err := c.client.StrLen(ctx, key).Result()
+	if err != nil {
+		return err
+	}
+	
+	if length > MaxTerminalHistorySize {
+		// 获取当前值，保留后 3/4
+		currentData, err := c.client.Get(ctx, key).Bytes()
+		if err != nil {
+			return err
+		}
+		keepStart := len(currentData) - (MaxTerminalHistorySize * 3 / 4)
+		if keepStart > 0 {
+			c.client.Set(ctx, key, currentData[keepStart:], TerminalHistoryTTL)
+		}
+	}
+	
+	// 更新过期时间
+	c.client.Expire(ctx, key, TerminalHistoryTTL)
+	
+	return nil
+}
+
+// GetTerminalHistory 获取终端历史记录
+// 参数:
+//   - ctx: 上下文
+//   - desktopID: 设备ID
+//
+// 返回:
+//   - []byte: 终端历史数据（原始二进制）
+//   - error: Redis 操作错误
+func (c *RedisCache) GetTerminalHistory(ctx context.Context, desktopID int64) ([]byte, error) {
+	key := fmt.Sprintf("terminal:history:%d", desktopID)
+	data, err := c.client.Get(ctx, key).Bytes()
+	if err == redis.Nil {
+		return nil, nil // 没有历史记录
+	}
+	return data, err
+}
+
+// ClearTerminalHistory 清除终端历史记录
+// 参数:
+//   - ctx: 上下文
+//   - desktopID: 设备ID
+//
+// 返回:
+//   - error: Redis 操作错误
+func (c *RedisCache) ClearTerminalHistory(ctx context.Context, desktopID int64) error {
+	key := fmt.Sprintf("terminal:history:%d", desktopID)
+	return c.client.Del(ctx, key).Err()
+}

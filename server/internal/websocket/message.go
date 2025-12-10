@@ -15,10 +15,11 @@ const (
 	TypeAgentStatus    = "agent:status"    // AI 状态变更
 
 	// 终端消息类型（双向透传）
-	TypeTerminalInput  = "terminal:input"  // 手机端 → 电脑端：终端输入
-	TypeTerminalOutput = "terminal:output" // 电脑端 → 手机端：终端输出
-	TypeTerminalResize = "terminal:resize" // 手机端 → 电脑端：调整终端大小
-	TypeTerminalExit   = "terminal:exit"   // 电脑端 → 手机端：终端退出
+	TypeTerminalInput   = "terminal:input"   // 手机端 → 电脑端：终端输入
+	TypeTerminalOutput  = "terminal:output"  // 电脑端 → 手机端：终端输出
+	TypeTerminalResize  = "terminal:resize"  // 手机端 → 电脑端：调整终端大小
+	TypeTerminalExit    = "terminal:exit"    // 电脑端 → 手机端：终端退出
+	TypeTerminalHistory = "terminal:history" // 双向：请求/返回终端历史
 
 	// 服务端 → 电脑端
 	TypeUserMessage    = "user:message"    // 用户发送的消息

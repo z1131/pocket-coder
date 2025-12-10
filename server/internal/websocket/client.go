@@ -201,6 +201,12 @@ func (c *Client) handleMessage(msg *Message) {
 			c.hub.handleTerminalToMobile(c, msg)
 		}
 
+	case TypeTerminalHistory:
+		// 手机端请求历史：从 Redis 获取并返回
+		if c.clientType == ClientTypeMobile {
+			c.hub.handleTerminalHistoryRequest(c, msg)
+		}
+
 	case TypeAgentResponse:
 		// 电脑端返回 AI 完整响应
 		if c.clientType == ClientTypeDesktop {

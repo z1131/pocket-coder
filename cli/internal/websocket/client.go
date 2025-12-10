@@ -19,10 +19,11 @@ const (
 	TypePing      = "ping"
 
 	// 终端消息类型
-	TypeTerminalInput  = "terminal:input"  // 手机端输入
-	TypeTerminalOutput = "terminal:output" // 终端输出
-	TypeTerminalResize = "terminal:resize" // 调整大小
-	TypeTerminalExit   = "terminal:exit"   // 终端退出
+	TypeTerminalInput   = "terminal:input"   // 手机端输入
+	TypeTerminalOutput  = "terminal:output"  // 终端输出
+	TypeTerminalResize  = "terminal:resize"  // 调整大小
+	TypeTerminalExit    = "terminal:exit"    // 终端退出
+	TypeTerminalHistory = "terminal:history" // 请求/发送终端历史
 
 	// 旧类型（兼容）
 	TypeCommand  = "command"  // 来自手机的指令

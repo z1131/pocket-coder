@@ -3,6 +3,7 @@ package websocket
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"log"
 	"sync"
@@ -402,8 +403,76 @@ func (h *Hub) handleTerminalToDesktop(client *Client, msg *Message) {
 
 // handleTerminalToMobile 处理终端消息（电脑端 → 手机端）
 func (h *Hub) handleTerminalToMobile(client *Client, msg *Message) {
+	// 如果是终端输出，存储到 Redis
+	if msg.Type == TypeTerminalOutput {
+		if payload, ok := msg.Payload.(map[string]interface{}); ok {
+			if data, ok := payload["data"].(string); ok && data != "" {
+				// 先解码 base64，存储原始数据
+				decoded, err := base64.StdEncoding.DecodeString(data)
+				if err != nil {
+					log.Printf("Failed to decode terminal output: %v", err)
+				} else {
+					ctx := context.Background()
+					if err := h.cache.AppendTerminalHistory(ctx, client.desktopID, decoded); err != nil {
+						log.Printf("Failed to append terminal history: %v", err)
+					}
+				}
+			}
+		}
+	}
+
 	// 直接转发给用户的所有手机端
 	h.notifyMobileClients(client.userID, msg)
+}
+
+// handleTerminalHistoryRequest 处理终端历史请求（手机端请求）
+func (h *Hub) handleTerminalHistoryRequest(client *Client, msg *Message) {
+	// 从 payload 获取目标设备 ID
+	payload, ok := msg.Payload.(map[string]interface{})
+	if !ok {
+		log.Printf("Invalid terminal history request payload")
+		return
+	}
+
+	desktopID, ok := payload["desktop_id"].(float64)
+	if !ok || desktopID == 0 {
+		log.Printf("Missing desktop_id in terminal history request")
+		return
+	}
+
+	// 检查设备所有权
+	ctx := context.Background()
+	desktop, err := h.desktopService.GetDesktopByID(ctx, int64(desktopID))
+	if err != nil || desktop == nil || desktop.UserID != client.userID {
+		client.SendMessage(NewMessage(TypeError, &ErrorPayload{
+			Code:    1003,
+			Message: "无权操作此设备",
+		}))
+		return
+	}
+
+	// 从 Redis 获取历史记录
+	history, err := h.cache.GetTerminalHistory(ctx, int64(desktopID))
+	if err != nil {
+		log.Printf("Failed to get terminal history: %v", err)
+		return
+	}
+
+	if len(history) == 0 {
+		log.Printf("No terminal history for desktop %d", int64(desktopID))
+		return
+	}
+
+	log.Printf("Sending terminal history for desktop %d, length: %d", int64(desktopID), len(history))
+
+	// 将原始数据编码为 base64 后返回
+	encoded := base64.StdEncoding.EncodeToString(history)
+
+	// 直接返回给请求的手机端
+	client.SendMessage(NewMessage(TypeTerminalHistory, map[string]interface{}{
+		"desktop_id": int64(desktopID),
+		"data":       encoded,
+	}))
 }
 
 // IsDesktopConnected 检查设备是否已连接

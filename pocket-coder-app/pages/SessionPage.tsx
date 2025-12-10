@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { usePocketWS } from '../hooks/usePocketWS';
@@ -14,12 +14,18 @@ const SessionPage: React.FC = () => {
   const { accessToken } = useAuth();
   const [terminalOutput, setTerminalOutput] = useState<string>('');
   const [showKeyboard, setShowKeyboard] = useState(false);
+  const historyRequestedRef = useRef(false);
 
   const handleEvent = useCallback((evt: PocketEvent) => {
     switch (evt.kind) {
       case 'terminal:output':
         // 累加终端输出，而不是覆盖
         setTerminalOutput(prev => prev + evt.data);
+        break;
+      case 'terminal:history':
+        // 收到历史记录，写入终端（覆盖，因为是初始状态）
+        console.log('[SessionPage] Received terminal history, length:', evt.data.length);
+        setTerminalOutput(evt.data);
         break;
       case 'terminal:exit':
         console.log('Terminal exited with code:', evt.code);
@@ -33,7 +39,7 @@ const SessionPage: React.FC = () => {
     }
   }, [navigate]);
 
-  const { status: wsStatus, sendTerminalInput, sendTerminalResize } = usePocketWS({
+  const { status: wsStatus, sendTerminalInput, sendTerminalResize, requestTerminalHistory } = usePocketWS({
     token: accessToken,
     onEvent: handleEvent
   });
@@ -59,6 +65,18 @@ const SessionPage: React.FC = () => {
       navigate('/desktops', { replace: true });
     }
   }, [accessToken, navigate]);
+
+  // 连接后请求终端历史
+  useEffect(() => {
+    if (wsStatus === ConnectionStatus.CONNECTED && desktopId && !historyRequestedRef.current) {
+      historyRequestedRef.current = true;
+      requestTerminalHistory(desktopId);
+    }
+    // 断开连接后重置标记，下次连接可以再次请求
+    if (wsStatus === ConnectionStatus.DISCONNECTED) {
+      historyRequestedRef.current = false;
+    }
+  }, [wsStatus, desktopId, requestTerminalHistory]);
 
   return (
     <div className="flex flex-col h-screen bg-black text-white">

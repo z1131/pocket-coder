@@ -86,6 +86,24 @@ export function usePocketWS(options: UsePocketWSOptions) {
           }
         }
         break;
+      case 'terminal:history':
+        if (payload?.data) {
+          // Decode base64 history data
+          try {
+            const binaryString = atob(payload.data);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            const decoded = new TextDecoder().decode(bytes);
+            console.log('[PocketWS] Terminal history decoded, length:', decoded.length);
+            event = { kind: 'terminal:history', data: decoded };
+          } catch (e) {
+            console.error('Failed to decode terminal history:', e);
+            event = { kind: 'terminal:history', data: payload.data };
+          }
+        }
+        break;
       case 'terminal:exit':
         event = { kind: 'terminal:exit', code: payload?.code || 0 };
         break;
@@ -257,6 +275,21 @@ export function usePocketWS(options: UsePocketWSOptions) {
     ws.send(JSON.stringify(payload));
   }, []);
 
+  const requestTerminalHistory = useCallback((desktopId: number) => {
+    const ws = socketRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    const payload = {
+      type: 'terminal:history',
+      payload: {
+        desktop_id: desktopId
+      },
+      timestamp: Date.now()
+    };
+    console.log('[PocketWS] Requesting terminal history for desktop:', desktopId);
+    ws.send(JSON.stringify(payload));
+  }, []);
+
 
 
   useEffect(() => {
@@ -278,5 +311,6 @@ export function usePocketWS(options: UsePocketWSOptions) {
     sendUserMessage,
     sendTerminalInput,
     sendTerminalResize,
+    requestTerminalHistory,
   };
 }

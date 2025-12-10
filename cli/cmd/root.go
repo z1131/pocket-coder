@@ -335,6 +335,10 @@ func setupTerminalHandlers(wsClient *websocket.Client, term *terminal.Terminal, 
 			// 调整终端大小
 			handleTerminalResize(term, msg)
 
+		case websocket.TypeTerminalHistory:
+			// 手机端请求历史记录
+			handleTerminalHistoryRequest(wsClient, term)
+
 		case "ping":
 			// 心跳响应
 			wsClient.SendMessage(&websocket.Message{
@@ -346,8 +350,25 @@ func setupTerminalHandlers(wsClient *websocket.Client, term *terminal.Terminal, 
 			return
 
 		default:
-			fmt.Printf("⚠️  未知消息类型: %s\n", msg.Type)
+			// 不打印未知消息，避免干扰终端
 		}
+	})
+}
+
+// handleTerminalHistoryRequest 处理终端历史请求
+func handleTerminalHistoryRequest(wsClient *websocket.Client, term *terminal.Terminal) {
+	history := term.GetHistory()
+	if len(history) == 0 {
+		return
+	}
+
+	// 使用 base64 编码
+	encoded := base64.StdEncoding.EncodeToString(history)
+	wsClient.SendMessage(&websocket.Message{
+		Type: websocket.TypeTerminalHistory,
+		Payload: map[string]interface{}{
+			"data": encoded,
+		},
 	})
 }
 

@@ -2,14 +2,17 @@
 package terminal
 
 import (
-"fmt"
-"io"
-"os"
-"os/exec"
-"sync"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"sync"
 
-"github.com/creack/pty"
+	"github.com/creack/pty"
 )
+
+// 历史缓冲区最大大小（64KB）
+const MaxHistorySize = 64 * 1024
 
 // Terminal PTY 终端
 type Terminal struct {
@@ -23,6 +26,10 @@ type Terminal struct {
 	rows         uint16
 	cols         uint16
 	localDisplay bool // 是否在本地终端显示输出
+
+	// 历史输出缓冲区
+	history   []byte
+	historyMu sync.RWMutex
 }
 
 // NewTerminal 创建新终端
@@ -32,6 +39,7 @@ func NewTerminal() *Terminal {
 		cols:         80,
 		done:         make(chan struct{}),
 		localDisplay: false,
+		history:      make([]byte, 0, MaxHistorySize),
 	}
 }
 
@@ -189,6 +197,9 @@ func (t *Terminal) readOutput() {
 			data := make([]byte, n)
 			copy(data, buf[:n])
 
+			// 保存到历史缓冲区
+			t.appendHistory(data)
+
 			// 如果启用本地显示，同时输出到标准输出
 			if t.localDisplay {
 				os.Stdout.Write(data)
@@ -200,6 +211,32 @@ func (t *Terminal) readOutput() {
 			}
 		}
 	}
+}
+
+// appendHistory 追加数据到历史缓冲区
+func (t *Terminal) appendHistory(data []byte) {
+	t.historyMu.Lock()
+	defer t.historyMu.Unlock()
+
+	t.history = append(t.history, data...)
+
+	// 如果超过最大大小，截取后半部分
+	if len(t.history) > MaxHistorySize {
+		// 保留后 3/4 的内容
+		keepFrom := len(t.history) - (MaxHistorySize * 3 / 4)
+		t.history = t.history[keepFrom:]
+	}
+}
+
+// GetHistory 获取历史输出
+func (t *Terminal) GetHistory() []byte {
+	t.historyMu.RLock()
+	defer t.historyMu.RUnlock()
+
+	// 返回副本，避免竞态
+	result := make([]byte, len(t.history))
+	copy(result, t.history)
+	return result
 }
 
 // waitExit 等待进程退出
