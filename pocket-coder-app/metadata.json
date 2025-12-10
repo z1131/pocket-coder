@@ -1,0 +1,5 @@
+{
+  "name": "Pocket Coder",
+  "description": "A high-performance mobile interface for remote AI development agents, featuring beautiful diff visualization and context-aware controls.",
+  "requestFramePermissions": []
+}

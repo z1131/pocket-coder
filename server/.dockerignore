@@ -1,0 +1,31 @@
+# 依赖目录
+vendor/
+
+# 编译输出
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+server
+
+# 测试
+*.test
+coverage.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+logs/
+
+# 本地配置（生产配置通过环境变量）
+configs/config.local.yaml

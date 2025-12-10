@@ -1,0 +1,31 @@
+services:
+  # Go 服务端 (使用阿里云 MySQL 和 Redis)
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: pocket-coder-server
+    ports:
+      - "8080:8080"
+    environment:
+      # 服务器配置
+      - SERVER_PORT=8080
+      - SERVER_MODE=release
+      # 阿里云 MySQL RDS (公网地址)
+      - MYSQL_HOST=rm-bp1tbjfarup52kbpbao.mysql.rds.aliyuncs.com
+      - MYSQL_PORT=3306
+      - MYSQL_USERNAME=pocket_coder
+      - MYSQL_PASSWORD=Aa1231231212123
+      - MYSQL_DATABASE=pocket_coder
+      # 阿里云 Redis
+      - REDIS_HOST=r-bp1vv94ogy8k2a1e5jpd.redis.rds.aliyuncs.com
+      - REDIS_PORT=6379
+      - REDIS_USERNAME=pocket_coder
+      - REDIS_PASSWORD=Aa1231231212123
+      # JWT 配置
+      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
+    restart: unless-stopped
+
+networks:
+  default:
+    driver: bridge
