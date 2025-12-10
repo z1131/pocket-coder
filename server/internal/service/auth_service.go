@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"regexp"
 	"time"
 
 	"pocket-coder-server/internal/cache"
@@ -16,14 +17,26 @@ import (
 
 // 定义业务错误
 var (
-	ErrUserExists       = errors.New("用户名已存在")
-	ErrEmailExists      = errors.New("邮箱已被注册")
-	ErrUserNotFound     = errors.New("用户不存在")
-	ErrPasswordWrong    = errors.New("密码错误")
+	ErrUserExists         = errors.New("用户名已存在")
+	ErrEmailExists        = errors.New("邮箱已被注册")
+	ErrUserNotFound       = errors.New("用户不存在")
+	ErrPasswordWrong      = errors.New("密码错误")
+	ErrInvalidUsername    = errors.New("用户名只能包含字母、数字和下划线，长度3-20")
 	ErrDeviceCodeNotFound = errors.New("设备授权码不存在或已过期")
 	ErrDeviceCodePending  = errors.New("设备授权码等待授权中")
 	ErrInvalidUserCode    = errors.New("无效的用户码")
 )
+
+// 用户名验证正则：只允许字母、数字、下划线，长度3-20
+var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9_]{3,20}$`)
+
+// validateUsername 验证用户名格式
+func validateUsername(username string) error {
+	if !usernamePattern.MatchString(username) {
+		return ErrInvalidUsername
+	}
+	return nil
+}
 
 // AuthService 认证服务
 // 处理用户注册、登录、登出以及设备授权
@@ -71,7 +84,12 @@ type RegisterResponse struct {
 //   - *RegisterResponse: 注册成功返回用户信息
 //   - error: 注册失败返回错误（用户名/邮箱已存在等）
 func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (*RegisterResponse, error) {
-	// 1. 检查用户名是否已存在
+	// 1. 验证用户名格式
+	if err := validateUsername(req.Username); err != nil {
+		return nil, err
+	}
+
+	// 2. 检查用户名是否已存在
 	exists, err := s.userRepo.ExistsByUsername(ctx, req.Username)
 	if err != nil {
 		return nil, err

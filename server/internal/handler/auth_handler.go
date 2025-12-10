@@ -48,6 +48,8 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	if err != nil {
 		// 根据错误类型返回不同的响应
 		switch err {
+		case service.ErrInvalidUsername:
+			response.BadRequest(c, "用户名只能包含字母、数字和下划线，长度3-20")
 		case service.ErrUserExists:
 			response.UserExists(c)
 		case service.ErrEmailExists:

@@ -21,6 +21,14 @@ const RegisterPage: React.FC = () => {
       setError('用户名和密码不能为空');
       return;
     }
+    
+    // 验证用户名格式
+    const usernamePattern = /^[a-zA-Z0-9_]{3,20}$/;
+    if (!usernamePattern.test(username)) {
+      setError('用户名只能包含字母、数字和下划线，长度3-20');
+      return;
+    }
+    
     if (password.length < 6) {
       setError('密码至少 6 位');
       return;
@@ -55,9 +63,10 @@ const RegisterPage: React.FC = () => {
               className="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 focus:outline-none focus:border-neutral-500"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="your-name"
+              placeholder="username (字母、数字、下划线)"
               autoComplete="username"
             />
+            <span className="text-xs text-neutral-500">只能包含字母、数字和下划线，长度3-20</span>
           </label>
 
           <label className="flex flex-col gap-2 text-sm">
