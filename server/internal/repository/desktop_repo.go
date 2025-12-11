@@ -212,6 +212,50 @@ func (r *DesktopRepository) CountByUserID(ctx context.Context, userID int64) (in
 	return count, err
 }
 
+// GetByUserIDAndName 根据用户ID和设备名称获取设备
+// 用于检查同一用户是否已注册同名设备
+// 参数:
+//   - ctx: 上下文
+//   - userID: 用户ID
+//   - name: 设备名称
+//
+// 返回:
+//   - *model.Desktop: 设备对象，未找到返回 nil
+//   - error: 数据库错误
+func (r *DesktopRepository) GetByUserIDAndName(ctx context.Context, userID int64, name string) (*model.Desktop, error) {
+	var desktop model.Desktop
+	err := r.db.WithContext(ctx).Where("user_id = ? AND name = ?", userID, name).First(&desktop).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &desktop, nil
+}
+
+// GetByUserIDAndDeviceUUID 根据用户ID和设备UUID获取设备
+// 用于设备去重：同一用户 + 同一设备UUID = 同一台物理设备
+// 参数:
+//   - ctx: 上下文
+//   - userID: 用户ID
+//   - deviceUUID: 设备唯一标识（客户端持久化的 UUID）
+//
+// 返回:
+//   - *model.Desktop: 设备对象，未找到返回 nil
+//   - error: 数据库错误
+func (r *DesktopRepository) GetByUserIDAndDeviceUUID(ctx context.Context, userID int64, deviceUUID string) (*model.Desktop, error) {
+	var desktop model.Desktop
+	err := r.db.WithContext(ctx).Where("user_id = ? AND device_uuid = ?", userID, deviceUUID).First(&desktop).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &desktop, nil
+}
+
 // GetOnlineByUserID 获取用户的在线设备
 // 参数:
 //   - ctx: 上下文

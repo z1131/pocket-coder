@@ -11,6 +11,11 @@ import (
 	"pocket-coder-server/internal/repository"
 )
 
+// SessionNotifier 会话通知接口
+type SessionNotifier interface {
+	NotifySessionCreate(desktopID int64, sessionID int64, workingDir string)
+}
+
 // 会话服务相关错误
 var (
 	ErrSessionNotFound = errors.New("会话不存在")
@@ -24,6 +29,8 @@ type SessionService struct {
 	messageRepo *repository.MessageRepository // 消息数据访问层
 	desktopRepo *repository.DesktopRepository // 设备数据访问层
 	cache       *cache.RedisCache             // Redis 缓存
+	aiService   *AIService                    // AI 服务（可选）
+	notifier    SessionNotifier               // 会话通知器
 }
 
 // NewSessionService 创建 SessionService 实例
@@ -41,12 +48,24 @@ func NewSessionService(
 	}
 }
 
+// SetNotifier 设置通知器
+func (s *SessionService) SetNotifier(n SessionNotifier) {
+	s.notifier = n
+}
+
+// SetAIService 设置 AI 服务
+func (s *SessionService) SetAIService(aiService *AIService) {
+	s.aiService = aiService
+}
+
 // SessionResponse 会话响应
 type SessionResponse struct {
 	ID         int64   `json:"id"`
 	DesktopID  int64   `json:"desktop_id"`
 	AgentType  string  `json:"agent_type"`
 	WorkingDir *string `json:"working_dir,omitempty"`
+	Title      *string `json:"title,omitempty"`
+	Summary    *string `json:"summary,omitempty"`
 	Status     string  `json:"status"`
 	StartedAt  string  `json:"started_at"`
 	EndedAt    *string `json:"ended_at,omitempty"`
@@ -68,6 +87,7 @@ type MessageResponse struct {
 
 // CreateSessionRequest 创建会话请求
 type CreateSessionRequest struct {
+	DesktopID  int64   `json:"desktop_id"`  // 设备ID
 	WorkingDir *string `json:"working_dir"` // 工作目录（可选）
 }
 
@@ -96,10 +116,10 @@ func (s *SessionService) CreateSession(ctx context.Context, userID, desktopID in
 		return nil, ErrNoPermission
 	}
 
-	// 3. 结束之前的活跃会话（一个设备同时只有一个活跃会话）
-	if err := s.sessionRepo.EndAllActiveByDesktopID(ctx, desktopID); err != nil {
-		return nil, err
-	}
+	// 3. (已移除) 不再强制结束之前的活跃会话，支持多会话并存
+	// if err := s.sessionRepo.EndAllActiveByDesktopID(ctx, desktopID); err != nil {
+	// 	return nil, err
+	// }
 
 	// 4. 创建新会话
 	session := &model.Session{
@@ -122,6 +142,16 @@ func (s *SessionService) CreateSession(ctx context.Context, userID, desktopID in
 	// 5. 更新 Redis 中的活跃会话
 	if err := s.cache.SetActiveSession(ctx, desktopID, session.ID); err != nil {
 		// 非致命错误，记录日志但不返回错误
+	}
+
+	// 6. 通知 Agent 创建会话
+	if s.notifier != nil {
+		wd := ""
+		if session.WorkingDir != nil {
+			wd = *session.WorkingDir
+		}
+		// 异步通知，避免阻塞
+		go s.notifier.NotifySessionCreate(desktopID, session.ID, wd)
 	}
 
 	return s.toSessionResponse(session), nil
@@ -299,7 +329,15 @@ func (s *SessionService) EndSession(ctx context.Context, userID, sessionID int64
 		return err
 	}
 
-	// 5. 清除 Redis 缓存中的活跃会话
+	// 5. 异步生成 AI 总结（不阻塞返回）
+	go func() {
+		if err := s.GenerateSummary(context.Background(), sessionID); err != nil {
+			// 记录错误但不影响主流程
+			// log.Printf("Failed to generate session summary: %v", err)
+		}
+	}()
+
+	// 6. 清除 Redis 缓存中的活跃会话
 	return s.cache.ClearActiveSession(ctx, session.DesktopID)
 }
 
@@ -434,6 +472,8 @@ func (s *SessionService) toSessionResponse(session *model.Session) *SessionRespo
 		DesktopID:  session.DesktopID,
 		AgentType:  session.AgentType,
 		WorkingDir: session.WorkingDir,
+		Title:      session.Title,
+		Summary:    session.Summary,
 		Status:     session.Status,
 		StartedAt:  session.StartedAt.Format(time.RFC3339),
 	}
@@ -444,4 +484,69 @@ func (s *SessionService) toSessionResponse(session *model.Session) *SessionRespo
 	}
 
 	return resp
+}
+
+// GenerateSummary 为会话生成 AI 总结
+// 参数:
+//   - ctx: 上下文
+//   - sessionID: 会话ID
+//
+// 返回:
+//   - error: 操作错误
+func (s *SessionService) GenerateSummary(ctx context.Context, sessionID int64) error {
+	if s.aiService == nil {
+		return nil // AI 服务未配置，跳过
+	}
+
+	// 获取会话消息
+	messages, err := s.messageRepo.GetBySessionID(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	if len(messages) == 0 {
+		return nil // 没有消息，跳过
+	}
+
+	// 转换为 AI 服务需要的格式
+	msgList := make([]map[string]string, len(messages))
+	for i, msg := range messages {
+		msgList[i] = map[string]string{
+			"role":    msg.Role,
+			"content": msg.Content,
+		}
+	}
+
+	// 调用 AI 生成总结
+	summary, err := s.aiService.GenerateSessionSummary(ctx, msgList)
+	if err != nil {
+		return err
+	}
+
+	// 更新会话
+	return s.sessionRepo.UpdateSummary(ctx, sessionID, summary.Title, summary.Summary)
+}
+
+// EnsureDefaultSession 确保设备有活跃会话（用于 Agent 连入时）
+// 参数:
+//   - ctx: 上下文
+//   - userID: 用户ID
+//   - desktopID: 设备ID
+//
+// 返回:
+//   - *SessionResponse: 活跃会话
+//   - error: 操作错误
+func (s *SessionService) EnsureDefaultSession(ctx context.Context, userID, desktopID int64) (*SessionResponse, error) {
+	// 1. 尝试获取现有的活跃会话
+	session, err := s.GetActiveSession(ctx, userID, desktopID)
+	if err != nil {
+		return nil, err
+	}
+
+	if session != nil {
+		return session, nil
+	}
+
+	// 2. 如果没有，创建一个新的
+	return s.CreateSession(ctx, userID, desktopID, nil)
 }

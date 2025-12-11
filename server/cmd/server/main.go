@@ -71,8 +71,16 @@ func main() {
 	desktopService := service.NewDesktopService(desktopRepo, sessionRepo, redisCache)
 	sessionService := service.NewSessionService(sessionRepo, messageRepo, desktopRepo, redisCache)
 
+	// 初始化 AI 服务（如果配置了 API Key）
+	if cfg.AI.QwenAPIKey != "" {
+		aiService := service.NewAIService(cfg.AI.QwenAPIKey)
+		sessionService.SetAIService(aiService)
+		log.Println("AI service initialized with Qwen API")
+	}
+
 	// 初始化 WebSocket Hub
 	wsHub := websocket.NewHub(desktopService, sessionService, redisCache)
+	sessionService.SetNotifier(wsHub)
 	go wsHub.Run() // 在单独的 goroutine 中运行
 
 	// 初始化 Handler 层

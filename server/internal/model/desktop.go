@@ -32,8 +32,13 @@ type Desktop struct {
 	// 例如: "MacBook-Home", "Office-PC"
 	Name string `gorm:"size:100;not null" json:"name"`
 
-	// DeviceToken 设备唯一标识符
-	// 由设备端生成的 UUID，用于设备身份验证
+	// DeviceUUID 设备唯一标识（客户端持久化的 UUID）
+	// 用于设备去重：同一用户 + 同一 DeviceUUID = 同一台设备
+	// 即使用户更改主机名，此 UUID 也不会变化
+	DeviceUUID string `gorm:"size:64;index" json:"-"`
+
+	// DeviceToken 设备认证令牌
+	// 由服务端生成，用于设备身份验证
 	// 全局唯一，建立唯一索引
 	DeviceToken string `gorm:"size:64;uniqueIndex;not null" json:"-"` // 不对外暴露
 

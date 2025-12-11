@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import LoginPage from './pages/LoginPage';
 import DesktopsPage from './pages/DesktopsPage';
+import SessionsPage from './pages/SessionsPage';
 import SessionPage from './pages/SessionPage';
 import RegisterPage from './pages/RegisterPage';
 
@@ -52,6 +53,22 @@ const App: React.FC = () => {
         />
         <Route
           path="/desktops/:desktopId"
+          element={
+            <Guard>
+              <SessionPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="/desktops/:desktopId/sessions"
+          element={
+            <Guard>
+              <SessionsPage />
+            </Guard>
+          }
+        />
+        <Route
+          path="/desktops/:desktopId/sessions/:sessionId"
           element={
             <Guard>
               <SessionPage />

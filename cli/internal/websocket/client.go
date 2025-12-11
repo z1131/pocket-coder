@@ -25,6 +25,9 @@ const (
 	TypeTerminalExit    = "terminal:exit"    // 终端退出
 	TypeTerminalHistory = "terminal:history" // 请求/发送终端历史
 
+	// 服务端 -> 客户端
+	TypeSessionCreate = "session:create" // 创建新会话
+
 	// 旧类型（兼容）
 	TypeCommand  = "command"  // 来自手机的指令
 	TypeAck      = "ack"      // 确认收到

@@ -62,6 +62,7 @@ func (c *Client) Login(username, password string) (*LoginResponse, error) {
 // --- 设备注册 ---
 type RegisterDesktopRequest struct {
     Name       string  `json:"name"`
+    DeviceUUID string  `json:"device_uuid"`            // 设备唯一标识（持久化的 UUID）
     AgentType  *string `json:"agent_type,omitempty"`
     WorkingDir *string `json:"working_dir,omitempty"`
     OSInfo     *string `json:"os_info,omitempty"`

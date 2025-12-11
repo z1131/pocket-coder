@@ -17,6 +17,7 @@ import (
 
 	"pocket-coder-cli/internal/api"
 	"pocket-coder-cli/internal/config"
+	"pocket-coder-cli/internal/session"
 	"pocket-coder-cli/internal/terminal"
 	"pocket-coder-cli/internal/websocket"
 )
@@ -147,9 +148,17 @@ func doInteractiveLogin() {
 	workingDir, _ := os.Getwd()
 	agentType := "claude-code"
 
+	// 获取或生成设备 UUID
+	deviceUUID, err := config.GetDeviceUUID()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ 获取设备标识失败: %v\n", err)
+		os.Exit(1)
+	}
+
 	fmt.Println("💻 正在绑定当前电脑...")
 	regReq := &api.RegisterDesktopRequest{
 		Name:       hostname,
+		DeviceUUID: deviceUUID,
 		AgentType:  &agentType,
 		WorkingDir: &workingDir,
 		OSInfo:     &osInfo,
@@ -194,7 +203,7 @@ func startWebSocket() {
 	fmt.Printf("  📁 工作目录: %s\n", workDir)
 	fmt.Println()
 
-	// 创建 PTY 终端
+	// 创建默认 PTY 终端
 	ptyTerm := terminal.NewTerminal()
 	
 	// 启用本地显示
@@ -203,8 +212,11 @@ func startWebSocket() {
 	// 创建 WebSocket 客户端
 	wsClient := websocket.NewClient(config.GetServerURL(), desktopToken, desktopID)
 
+	// 创建会话管理器
+	sessMgr := session.NewManager(wsClient, ptyTerm, workDir)
+
 	// 设置消息处理
-	setupTerminalHandlers(wsClient, ptyTerm, workDir)
+	setupHandlers(wsClient, sessMgr)
 
 	// 连接服务器
 	if err := wsClient.Connect(); err != nil {
@@ -212,7 +224,7 @@ func startWebSocket() {
 		os.Exit(1)
 	}
 
-	// 启动终端
+	// 启动默认终端
 	if err := ptyTerm.Start(workDir); err != nil {
 		fmt.Fprintf(os.Stderr, "✗ 启动终端失败: %v\n", err)
 		wsClient.Disconnect()
@@ -270,7 +282,7 @@ func startWebSocket() {
 					}
 				}
 
-				// 写入 PTY
+				// 写入 PTY (这里总是写入默认终端，因为本地键盘只能控制主终端)
 				ptyTerm.Write(buf[:n])
 			}
 		}
@@ -299,133 +311,94 @@ func startWebSocket() {
 	fmt.Println("✅ 已断开连接，再见！")
 }
 
-// setupTerminalHandlers 设置终端消息处理器
-func setupTerminalHandlers(wsClient *websocket.Client, term *terminal.Terminal, workDir string) {
-	// 终端输出 → 发送到手机端
-	term.OnOutput(func(data []byte) {
-		// 使用 base64 编码二进制数据
-		encoded := base64.StdEncoding.EncodeToString(data)
-		wsClient.SendMessage(&websocket.Message{
-			Type: websocket.TypeTerminalOutput,
-			Payload: map[string]interface{}{
-				"data": encoded,
-			},
-		})
-	})
-
-	// 终端退出
-	term.OnExit(func(code int) {
-		fmt.Printf("📤 终端已退出 (code: %d)\n", code)
-		wsClient.SendMessage(&websocket.Message{
-			Type: websocket.TypeTerminalExit,
-			Payload: map[string]interface{}{
-				"code": code,
-			},
-		})
-	})
-
-	// 处理来自服务器的消息
+// setupHandlers 设置 WebSocket 消息处理器
+func setupHandlers(wsClient *websocket.Client, sessMgr *session.Manager) {
 	wsClient.OnMessage(func(msg *websocket.Message) {
 		switch msg.Type {
+		case websocket.TypeSessionCreate:
+			// 创建/分配会话
+			if payload, ok := msg.Payload.(map[string]interface{}); ok {
+				var sessionID int64
+				if sid, ok := payload["session_id"].(float64); ok {
+					sessionID = int64(sid)
+				}
+				workingDir, _ := payload["working_dir"].(string)
+				
+				if sessionID > 0 {
+					sessMgr.HandleSessionCreate(sessionID, workingDir)
+				}
+			}
+
 		case websocket.TypeTerminalInput, "user:message":
 			// 手机端输入
-			handleTerminalInput(term, msg)
+			var sessionID int64
+			var data string
+
+			if payload, ok := msg.Payload.(map[string]interface{}); ok {
+				if sid, ok := payload["session_id"].(float64); ok {
+					sessionID = int64(sid)
+				}
+				if d, ok := payload["data"].(string); ok {
+					data = d
+				}
+			}
+
+			// 兼容旧格式
+			if data == "" && msg.Content != "" {
+				data = msg.Content
+			}
+
+			if data != "" {
+				// Base64 解码
+				decoded, err := base64.StdEncoding.DecodeString(data)
+				if err != nil {
+					decoded = []byte(data)
+				}
+				sessMgr.Write(sessionID, decoded)
+			}
 
 		case websocket.TypeTerminalResize:
 			// 调整终端大小
-			handleTerminalResize(term, msg)
+			if payload, ok := msg.Payload.(map[string]interface{}); ok {
+				var sessionID int64
+				if sid, ok := payload["session_id"].(float64); ok {
+					sessionID = int64(sid)
+				}
+				rows, _ := payload["rows"].(float64)
+				cols, _ := payload["cols"].(float64)
+
+				if rows > 0 && cols > 0 {
+					sessMgr.Resize(sessionID, uint16(rows), uint16(cols))
+				}
+			}
 
 		case websocket.TypeTerminalHistory:
-			// 手机端请求历史记录
-			handleTerminalHistoryRequest(wsClient, term)
+			// 请求历史记录
+			if payload, ok := msg.Payload.(map[string]interface{}); ok {
+				var sessionID int64
+				if sid, ok := payload["session_id"].(float64); ok {
+					sessionID = int64(sid)
+				}
+				
+				history, err := sessMgr.GetHistory(sessionID)
+				if err == nil && len(history) > 0 {
+					encoded := base64.StdEncoding.EncodeToString(history)
+					wsClient.SendMessage(&websocket.Message{
+						Type: websocket.TypeTerminalHistory,
+						Payload: map[string]interface{}{
+							"session_id": sessionID,
+							"data":       encoded,
+						},
+					})
+				}
+			}
 
 		case "ping":
-			// 心跳响应
-			wsClient.SendMessage(&websocket.Message{
-				Type: "pong",
-			})
-
-		case "pong":
-			// 忽略心跳响应
-			return
-
-		default:
-			// 不打印未知消息，避免干扰终端
+			wsClient.SendMessage(&websocket.Message{Type: "pong"})
 		}
 	})
 }
 
-// handleTerminalHistoryRequest 处理终端历史请求
-func handleTerminalHistoryRequest(wsClient *websocket.Client, term *terminal.Terminal) {
-	history := term.GetHistory()
-	if len(history) == 0 {
-		return
-	}
-
-	// 使用 base64 编码
-	encoded := base64.StdEncoding.EncodeToString(history)
-	wsClient.SendMessage(&websocket.Message{
-		Type: websocket.TypeTerminalHistory,
-		Payload: map[string]interface{}{
-			"data": encoded,
-		},
-	})
-}
-
-// handleTerminalInput 处理终端输入
-func handleTerminalInput(term *terminal.Terminal, msg *websocket.Message) {
-	var data string
-
-	// 从 payload 获取数据
-	if payload, ok := msg.Payload.(map[string]interface{}); ok {
-		if d, ok := payload["data"].(string); ok {
-			data = d
-		}
-	}
-
-	// 兼容旧格式：从 content 获取
-	if data == "" && msg.Content != "" {
-		data = msg.Content
-	}
-
-	if data == "" {
-		return
-	}
-
-	// 尝试 base64 解码，如果失败则当作纯文本
-	decoded, err := base64.StdEncoding.DecodeString(data)
-	if err != nil {
-		// 不是 base64，当作纯文本
-		decoded = []byte(data)
-	}
-
-	// 调试日志（输出到 stderr 避免干扰终端）
-	// fmt.Fprintf(os.Stderr, "[DEBUG] 收到手机输入: %q (解码后: %q)\n", data, string(decoded))
-
-	// 写入终端
-	if err := term.Write(decoded); err != nil {
-		fmt.Fprintf(os.Stderr, "❌ 写入终端失败: %v\n", err)
-	}
-}
-
-// handleTerminalResize 处理终端大小调整
-func handleTerminalResize(term *terminal.Terminal, msg *websocket.Message) {
-	payload, ok := msg.Payload.(map[string]interface{})
-	if !ok {
-		return
-	}
-
-	rows, _ := payload["rows"].(float64)
-	cols, _ := payload["cols"].(float64)
-
-	if rows > 0 && cols > 0 {
-		if err := term.Resize(uint16(rows), uint16(cols)); err != nil {
-			fmt.Printf("❌ 调整终端大小失败: %v\n", err)
-		} else {
-			fmt.Printf("📐 终端大小调整为 %dx%d\n", int(cols), int(rows))
-		}
-	}
-}
 
 func askYesNo(prompt string) bool {
 	reader := bufio.NewReader(os.Stdin)

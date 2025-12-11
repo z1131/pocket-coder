@@ -66,6 +66,39 @@ export async function renameDesktop(id: number, name: string, token: string): Pr
   }, token);
 }
 
+// 会话类型
+export type SessionItem = {
+  id: number;
+  desktop_id: number;
+  agent_type: string;
+  working_dir?: string | null;
+  title?: string | null;
+  summary?: string | null;
+  status: string;
+  started_at: string;
+  ended_at?: string | null;
+};
+
+export type SessionsResponse = {
+  sessions: SessionItem[];
+  total: number;
+};
+
+// 获取设备的会话列表
+export async function fetchSessions(desktopId: number, token: string, page: number = 1, pageSize: number = 20): Promise<SessionsResponse> {
+  return request<SessionsResponse>(`/api/v1/sessions?desktop_id=${desktopId}&page=${page}&page_size=${pageSize}`, { method: 'GET' }, token);
+}
+
+// 创建新会话
+export async function createSession(desktopId: number, token: string, workingDir?: string): Promise<SessionItem> {
+  // 注意：后端现在改为从 Body 读取 desktop_id，且 path 为 /api/v1/sessions
+  // 返回的是 SessionResponse (即 SessionItem)
+  return request<SessionItem>('/api/v1/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ desktop_id: desktopId, working_dir: workingDir }),
+  }, token);
+}
+
 // 刷新 Token 响应类型
 export type RefreshTokenResponse = {
   access_token: string;

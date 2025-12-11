@@ -114,6 +114,22 @@ func (h *Hub) registerClient(client *Client) {
 			}))
 		}()
 
+		// 确保有一个活跃会话，并通知 Agent
+		go func() {
+			ctx := context.Background()
+			session, err := h.sessionService.EnsureDefaultSession(ctx, client.userID, client.desktopID)
+			if err != nil {
+				log.Printf("Failed to ensure default session: %v", err)
+				return
+			}
+
+			// 发送会话信息给 Agent
+			// Agent 端逻辑：如果接收到此消息且本地没有任何关联的会话，将其绑定到默认 PTY
+			client.SendMessage(NewMessage(TypeSessionCreate, &SessionCreatePayload{
+				SessionID: session.ID,
+			}))
+		}()
+
 		log.Printf("Desktop client registered: desktopID=%d, userID=%d", client.desktopID, client.userID)
 	}
 }
@@ -488,4 +504,12 @@ func (h *Hub) GetOnlineDesktops(userID int64) []int64 {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.userDesktops[userID]
+}
+
+// NotifySessionCreate 实现 SessionNotifier 接口
+func (h *Hub) NotifySessionCreate(desktopID int64, sessionID int64, workingDir string) {
+	h.notifyDesktopClient(desktopID, NewMessage(TypeSessionCreate, &SessionCreatePayload{
+		SessionID:  sessionID,
+		WorkingDir: workingDir,
+	}))
 }

@@ -30,6 +30,12 @@ type Session struct {
 	// 创建会话时的项目路径
 	WorkingDir *string `gorm:"size:500" json:"working_dir,omitempty"`
 
+	// Title 会话标题，由 AI 根据对话内容生成
+	Title *string `gorm:"size:200" json:"title,omitempty"`
+
+	// Summary 会话摘要，由 AI 根据对话内容生成，不超过100字
+	Summary *string `gorm:"size:500" json:"summary,omitempty"`
+
 	// Status 会话状态
 	// active: 活跃中，可以继续对话
 	// ended: 已结束

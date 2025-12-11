@@ -17,6 +17,12 @@ type Config struct {
 	Redis  RedisConfig  `mapstructure:"redis"`  // Redis 配置
 	JWT    JWTConfig    `mapstructure:"jwt"`    // JWT 配置
 	Log    LogConfig    `mapstructure:"log"`    // 日志配置
+	AI     AIConfig     `mapstructure:"ai"`     // AI 服务配置
+}
+
+// AIConfig AI 服务配置
+type AIConfig struct {
+	QwenAPIKey string `mapstructure:"qwen_api_key"` // Qwen API Key
 }
 
 // ServerConfig 服务器相关配置
@@ -129,6 +135,9 @@ func bindEnvVariables(v *viper.Viper) {
 
 	// JWT 配置
 	v.BindEnv("jwt.secret", "JWT_SECRET")
+
+	// AI 配置
+	v.BindEnv("ai.qwen_api_key", "QWEN_API_KEY")
 }
 
 // setDefaults 设置配置项的默认值

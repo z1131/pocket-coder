@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/google/uuid"
 	"github.com/spf13/viper"
 )
 
@@ -33,6 +34,7 @@ type DeviceConfig struct {
 var (
 	cfg        *Config
 	configPath string
+	configDir  string
 )
 
 // Init 初始化配置
@@ -44,7 +46,7 @@ func Init() error {
 	}
 
 	// 配置目录
-	configDir := filepath.Join(home, ".pocket-coder")
+	configDir = filepath.Join(home, ".pocket-coder")
 	configPath = filepath.Join(configDir, "config.yaml")
 
 	// 创建配置目录
@@ -184,4 +186,30 @@ func getHostname() string {
 		return "unknown"
 	}
 	return hostname
+}
+
+// GetDeviceUUID 获取或生成设备唯一标识
+// 该 UUID 持久化存储在 ~/.pocket-coder/device_id 文件中
+// 即使用户更改主机名，设备 UUID 也不会变化
+func GetDeviceUUID() (string, error) {
+	deviceIDPath := filepath.Join(configDir, "device_id")
+
+	// 尝试读取现有的 device_id
+	data, err := os.ReadFile(deviceIDPath)
+	if err == nil {
+		deviceUUID := string(data)
+		if deviceUUID != "" {
+			return deviceUUID, nil
+		}
+	}
+
+	// 如果不存在或为空，生成新的 UUID
+	newUUID := uuid.New().String()
+
+	// 持久化保存
+	if err := os.WriteFile(deviceIDPath, []byte(newUUID), 0600); err != nil {
+		return "", fmt.Errorf("保存设备 UUID 失败: %w", err)
+	}
+
+	return newUUID, nil
 }

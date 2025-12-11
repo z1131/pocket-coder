@@ -54,6 +54,7 @@ type DesktopResponse struct {
 // RegisterDesktopRequest 注册设备请求
 type RegisterDesktopRequest struct {
 	Name       string  `json:"name" binding:"required"`
+	DeviceUUID string  `json:"device_uuid" binding:"required"` // 客户端持久化的设备 UUID
 	AgentType  *string `json:"agent_type,omitempty"`
 	WorkingDir *string `json:"working_dir,omitempty"`
 	OSInfo     *string `json:"os_info,omitempty"`
@@ -124,40 +125,70 @@ func (s *DesktopService) ListDesktops(ctx context.Context, userID int64) ([]Desk
 }
 
 // RegisterDesktop 为当前用户注册一台桌面设备
+// 使用 device_uuid 作为设备唯一标识进行去重
+// 如果设备已存在（按 device_uuid），则更新设备信息并返回
 // 创建记录并返回基础信息与设备令牌（用于后续生成桌面 JWT）
 func (s *DesktopService) RegisterDesktop(ctx context.Context, userID int64, req *RegisterDesktopRequest) (*RegisterDesktopResult, error) {
 	if req == nil || req.Name == "" {
 		return nil, errors.New("设备名称不能为空")
 	}
+	if req.DeviceUUID == "" {
+		return nil, errors.New("设备标识不能为空")
+	}
 
-	deviceToken := util.GenerateDeviceToken()
 	agentType := "claude-code"
 	if req.AgentType != nil && *req.AgentType != "" {
 		agentType = *req.AgentType
 	}
 
-	desktop := &model.Desktop{
-		UserID:      userID,
-		Name:        req.Name,
-		DeviceToken: deviceToken,
-		Type:        model.DesktopTypeLocal,
-		AgentType:   agentType,
-		WorkingDir:  req.WorkingDir,
-		OSInfo:      req.OSInfo,
-		Status:      model.DesktopStatusOffline,
-	}
-
-	if err := s.desktopRepo.Create(ctx, desktop); err != nil {
+	// 按 device_uuid 查找设备（比 name 更可靠，即使改主机名也能识别同一设备）
+	existing, err := s.desktopRepo.GetByUserIDAndDeviceUUID(ctx, userID, req.DeviceUUID)
+	if err != nil {
 		return nil, err
 	}
 
+	var desktop *model.Desktop
+	var deviceToken string
+
+	if existing != nil {
+		// 设备已存在，更新信息（包括可能变更的主机名）
+		deviceToken = existing.DeviceToken
+		existing.Name = req.Name // 更新主机名（可能已变更）
+		existing.AgentType = agentType
+		existing.WorkingDir = req.WorkingDir
+		existing.OSInfo = req.OSInfo
+
+		if err := s.desktopRepo.Update(ctx, existing); err != nil {
+			return nil, err
+		}
+		desktop = existing
+	} else {
+		// 创建新设备
+		deviceToken = util.GenerateDeviceToken()
+		desktop = &model.Desktop{
+			UserID:      userID,
+			Name:        req.Name,
+			DeviceUUID:  req.DeviceUUID,
+			DeviceToken: deviceToken,
+			Type:        model.DesktopTypeLocal,
+			AgentType:   agentType,
+			WorkingDir:  req.WorkingDir,
+			OSInfo:      req.OSInfo,
+			Status:      model.DesktopStatusOffline,
+		}
+
+		if err := s.desktopRepo.Create(ctx, desktop); err != nil {
+			return nil, err
+		}
+	}
+
 	resp := &DesktopResponse{
-		ID:        desktop.ID,
-		Name:      desktop.Name,
-		Type:      desktop.Type,
-		AgentType: desktop.AgentType,
-		Status:    model.DesktopStatusOffline,
-		OSInfo:    desktop.OSInfo,
+		ID:         desktop.ID,
+		Name:       desktop.Name,
+		Type:       desktop.Type,
+		AgentType:  desktop.AgentType,
+		Status:     model.DesktopStatusOffline,
+		OSInfo:     desktop.OSInfo,
 		WorkingDir: desktop.WorkingDir,
 	}
 

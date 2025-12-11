@@ -62,7 +62,7 @@ const DesktopsPage: React.FC = () => {
   };
 
   const handleEnter = (id: number) => {
-    navigate(`/desktops/${id}`);
+    navigate(`/desktops/${id}/sessions`);
   };
 
   const getStatus = (desktop: DesktopItem) => {

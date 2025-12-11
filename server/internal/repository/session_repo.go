@@ -250,3 +250,22 @@ func (r *SessionRepository) CountByDesktopID(ctx context.Context, desktopID int6
 	err := r.db.WithContext(ctx).Model(&model.Session{}).Where("desktop_id = ?", desktopID).Count(&count).Error
 	return count, err
 }
+
+// UpdateSummary 更新会话的标题和摘要
+// 参数:
+//   - ctx: 上下文
+//   - id: 会话ID
+//   - title: 标题
+//   - summary: 摘要
+//
+// 返回:
+//   - error: 数据库错误
+func (r *SessionRepository) UpdateSummary(ctx context.Context, id int64, title, summary string) error {
+	return r.db.WithContext(ctx).
+		Model(&model.Session{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"title":   title,
+			"summary": summary,
+		}).Error
+}

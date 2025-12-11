@@ -39,3 +39,7 @@ jwt:
 log:
   level: info             # 日志级别: debug / info / warn / error
   format: json            # 日志格式: json / text
+
+# AI 服务配置
+ai:
+  qwen_api_key: sk-507581749f3147e5b360cb7f9d2198ef  # Qwen API Key (环境变量: QWEN_API_KEY)
