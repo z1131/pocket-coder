@@ -11,6 +11,21 @@ import { useAuthStore } from '../store/useStore';
 import VirtualKeyboard from '../components/VirtualKeyboard';
 import AIAssistant from '../components/AIAssistant';
 
+// Helper functions for UTF-8 Base64 encoding/decoding
+function utf8_to_b64(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  const binString = Array.from(bytes, (byte) =>
+    String.fromCodePoint(byte),
+  ).join("");
+  return btoa(binString);
+}
+
+function b64_to_utf8(str: string): string {
+  const binString = atob(str);
+  const bytes = Uint8Array.from(binString, (m) => m.codePointAt(0) || 0);
+  return new TextDecoder().decode(bytes);
+}
+
 const TerminalView: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [session, setSession] = useState<Session | null>(null);
@@ -106,7 +121,7 @@ const TerminalView: React.FC = () => {
     const offOutput = ws.on('terminal:output', (payload: any) => {
       if (payload.session_id === Number(sessionId) && payload.data) {
         try {
-          const text = atob(payload.data);
+          const text = b64_to_utf8(payload.data);
           term.write(text);
         } catch (e) {
           console.error('Failed to decode output', e);
@@ -117,7 +132,7 @@ const TerminalView: React.FC = () => {
     const offHistory = ws.on('terminal:history', (payload: any) => {
        if (payload.session_id === Number(sessionId) && payload.data) {
          try {
-           const text = atob(payload.data);
+           const text = b64_to_utf8(payload.data);
            term.write(text);
          } catch (e) {}
        }
@@ -140,8 +155,8 @@ const TerminalView: React.FC = () => {
     // Terminal Input
     term.onData((data) => {
       if (!ws) return;
-      // Encode Base64
-      const encoded = btoa(data);
+      // Encode Base64 with UTF-8 support
+      const encoded = utf8_to_b64(data);
       ws.send('terminal:input', {
         session_id: Number(sessionId),
         data: encoded,
@@ -181,7 +196,7 @@ const TerminalView: React.FC = () => {
     
     // Append newline and send
     const data = inputValue + '\r';
-    const encoded = btoa(data);
+    const encoded = utf8_to_b64(data);
     ws.send('terminal:input', {
       session_id: Number(sessionId),
       data: encoded,
@@ -207,7 +222,7 @@ const TerminalView: React.FC = () => {
     }
 
     if (sequence) {
-      const encoded = btoa(sequence);
+      const encoded = utf8_to_b64(sequence);
       ws.send('terminal:input', {
         session_id: Number(sessionId),
         data: encoded,
