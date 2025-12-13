@@ -138,4 +138,14 @@ export const api = {
       return res.data.data.session;
     },
   },
+  ai: {
+    generateCommand: async (prompt: string, context?: { os?: string; shell?: string }) => {
+      const res = await apiClient.post<ApiResponse<{ command: string; explanation?: string }>>('/ai/generate-command', {
+        prompt,
+        context: context || {},
+      });
+      return res.data.data;
+    },
+  },
 };
+

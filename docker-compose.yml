@@ -24,6 +24,8 @@ services:
       - REDIS_PASSWORD=Aa1231231212123
       # JWT 配置
       - JWT_SECRET=your-super-secret-jwt-key-change-in-production
+      # AI 配置
+      - QWEN_API_KEY=sk-507581749f3147e5b360cb7f9d2198ef
     restart: unless-stopped
 
 networks:

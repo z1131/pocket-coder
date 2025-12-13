@@ -118,6 +118,7 @@ const TerminalView: React.FC = () => {
       // Send resize
       ws.send('terminal:resize', { 
         session_id: Number(sessionId),
+        desktop_id: session.desktop_id,
         cols: term.cols, 
         rows: term.rows 
       });
@@ -169,6 +170,7 @@ const TerminalView: React.FC = () => {
       const encoded = utf8_to_b64(data);
       ws.send('terminal:input', {
         session_id: Number(sessionId),
+        desktop_id: session.desktop_id,
         data: encoded,
       });
     });
@@ -179,6 +181,7 @@ const TerminalView: React.FC = () => {
       if (ws) {
         ws.send('terminal:resize', {
           session_id: Number(sessionId),
+          desktop_id: session.desktop_id,
           cols: term.cols, 
           rows: term.rows 
         });
@@ -204,7 +207,7 @@ const TerminalView: React.FC = () => {
     const newValue = e.target.value;
     
     // If a modifier is active and we have input
-    if (activeModifier && newValue.length > 0) {
+    if (activeModifier && newValue.length > 0 && session) {
       // Get the last character typed (assuming append)
       const char = newValue.slice(-1);
       
@@ -216,6 +219,7 @@ const TerminalView: React.FC = () => {
           const encoded = utf8_to_b64(ctrlChar);
           ws.send('terminal:input', {
             session_id: Number(sessionId),
+            desktop_id: session.desktop_id,
             data: encoded,
           });
         } else if (code >= 97 && code <= 122) {
@@ -224,6 +228,7 @@ const TerminalView: React.FC = () => {
           const encoded = utf8_to_b64(ctrlChar);
           ws.send('terminal:input', {
             session_id: Number(sessionId),
+            desktop_id: session.desktop_id,
             data: encoded,
           });
         }
@@ -232,6 +237,7 @@ const TerminalView: React.FC = () => {
          const encoded = utf8_to_b64('\x1b' + char);
          ws.send('terminal:input', {
             session_id: Number(sessionId),
+            desktop_id: session.desktop_id,
             data: encoded,
          });
       }
@@ -249,13 +255,17 @@ const TerminalView: React.FC = () => {
   // Handle Input Bar (Quick Command)
   const handleQuickCommand = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputValue || !xtermRef.current) return;
+    if (!inputValue || !xtermRef.current || !session) return;
     
     // Append newline and send
     const data = inputValue + '\r';
     const encoded = utf8_to_b64(data);
+    
+    console.log('[TerminalView] Sending command:', JSON.stringify(data), 'Encoded:', encoded);
+
     ws.send('terminal:input', {
       session_id: Number(sessionId),
+      desktop_id: session.desktop_id,
       data: encoded,
     });
     setInputValue('');
@@ -264,15 +274,17 @@ const TerminalView: React.FC = () => {
 
   // Handle Virtual Keys
   const handleVirtualKey = (key: string) => {
-    if (!xtermRef.current) return;
+    if (!xtermRef.current || !session) return;
     
+    console.log('[TerminalView] Virtual Key pressed:', key);
+
     // Toggle Modifiers
     if (key === 'CTRL' || key === 'ALT') {
       setActiveModifier(current => current === key ? null : key);
       return;
     }
 
-    // If modifier is active, apply simple reset for now to avoid confusion
+    // If modifier is active, apply simple reset for now
     if (activeModifier) {
        setActiveModifier(null);
     }
@@ -292,13 +304,16 @@ const TerminalView: React.FC = () => {
 
     if (sequence) {
       const encoded = utf8_to_b64(sequence);
+      console.log('[TerminalView] Sending sequence:', JSON.stringify(sequence), 'Encoded:', encoded);
       ws.send('terminal:input', {
         session_id: Number(sessionId),
+        desktop_id: session.desktop_id,
         data: encoded,
       });
     }
     xtermRef.current.focus();
   };
+
 
   if (!session) return <div className="bg-slate-950 h-screen text-slate-500 flex items-center justify-center">Loading terminal...</div>;
 

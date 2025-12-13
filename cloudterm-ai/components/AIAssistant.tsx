@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Sparkles, Send, Check } from 'lucide-react';
-import { simulateAIResponse } from '../services/mockTerminalService';
+import { api } from '../services/api';
 
 interface Props {
   isOpen: boolean;
@@ -11,7 +11,8 @@ interface Props {
 const AIAssistant: React.FC<Props> = ({ isOpen, onClose, onApplyCommand }) => {
   const [prompt, setPrompt] = useState('');
   const [isThinking, setIsThinking] = useState(false);
-  const [suggestion, setSuggestion] = useState<string | null>(null);
+  const [suggestion, setSuggestion] = useState<{ command: string; explanation?: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) {
@@ -19,6 +20,7 @@ const AIAssistant: React.FC<Props> = ({ isOpen, onClose, onApplyCommand }) => {
       setPrompt('');
       setSuggestion(null);
       setIsThinking(false);
+      setError(null);
     }
   }, [isOpen]);
 
@@ -28,17 +30,25 @@ const AIAssistant: React.FC<Props> = ({ isOpen, onClose, onApplyCommand }) => {
 
     setIsThinking(true);
     setSuggestion(null);
+    setError(null);
     
-    // Call mock service
-    const result = await simulateAIResponse(prompt);
-    
-    setSuggestion(result);
-    setIsThinking(false);
+    try {
+      const result = await api.ai.generateCommand(prompt, {
+        os: 'linux', // Ideal: get from session context
+        shell: 'bash'
+      });
+      setSuggestion(result);
+    } catch (err: any) {
+      console.error('AI Error:', err);
+      setError(err.response?.data?.message || 'Failed to generate command. Please try again.');
+    } finally {
+      setIsThinking(false);
+    }
   };
 
   const handleSelect = () => {
     if (suggestion) {
-      onApplyCommand(suggestion);
+      onApplyCommand(suggestion.command);
       onClose();
     }
   };
@@ -70,13 +80,25 @@ const AIAssistant: React.FC<Props> = ({ isOpen, onClose, onApplyCommand }) => {
 
         {/* Content */}
         <div className="p-4 space-y-4 overflow-y-auto">
+          {/* Error Message */}
+          {error && (
+            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+              {error}
+            </div>
+          )}
+
           {/* Conversation History / Result */}
           {suggestion && (
             <div className="bg-slate-800 rounded-lg p-3 border border-slate-700 animate-in slide-in-from-bottom-2">
               <div className="text-xs text-slate-400 mb-1">Suggested Command:</div>
-              <div className="font-mono text-green-400 text-sm break-all bg-slate-950 p-2 rounded border border-slate-800 mb-3">
-                {suggestion}
+              <div className="font-mono text-green-400 text-sm break-all bg-slate-950 p-2 rounded border border-slate-800 mb-2">
+                {suggestion.command}
               </div>
+              {suggestion.explanation && (
+                <div className="text-xs text-slate-400 mb-3 italic">
+                  {suggestion.explanation}
+                </div>
+              )}
               <div className="flex gap-2 justify-end">
                  <button 
                   onClick={() => setSuggestion(null)} 
@@ -103,7 +125,7 @@ const AIAssistant: React.FC<Props> = ({ isOpen, onClose, onApplyCommand }) => {
           )}
 
           {/* Empty State / Prompt */}
-          {!suggestion && !isThinking && (
+          {!suggestion && !isThinking && !error && (
              <div className="text-center py-6 text-slate-500">
                 <p className="text-sm">Describe what you want to do in natural language.</p>
                 <p className="text-xs mt-1">e.g., "Undo the last commit" or "List all node processes"</p>

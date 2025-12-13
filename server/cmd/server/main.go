@@ -69,6 +69,7 @@ func main() {
 	userService := service.NewUserService(userRepo)
 	desktopService := service.NewDesktopService(desktopRepo, sessionRepo, redisCache)
 	sessionService := service.NewSessionService(sessionRepo, desktopRepo, redisCache)
+	aiService := service.NewAIService(cfg)
 
 	// 初始化 WebSocket Hub
 	wsHub := websocket.NewHub(desktopService, sessionService, redisCache)
@@ -80,6 +81,7 @@ func main() {
 	userHandler := handler.NewUserHandler(userService)
 	desktopHandler := handler.NewDesktopHandler(desktopService, jwtService)
 	sessionHandler := handler.NewSessionHandler(sessionService)
+	aiHandler := handler.NewAIHandler(aiService)
 	wsHandler := websocket.NewHandler(wsHub, desktopService, cfg.JWT.Secret)
 
 	// 设置 Gin 模式
@@ -96,7 +98,7 @@ func main() {
 	router.Use(middleware.CORSMiddleware())       // CORS
 
 	// 注册路由
-	registerRoutes(router, jwtService, redisCache, authHandler, userHandler, desktopHandler, sessionHandler, wsHandler)
+	registerRoutes(router, jwtService, redisCache, authHandler, userHandler, desktopHandler, sessionHandler, aiHandler, wsHandler)
 
 	// 创建 HTTP 服务器
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
@@ -206,6 +208,7 @@ func registerRoutes(
 	userHandler *handler.UserHandler,
 	desktopHandler *handler.DesktopHandler,
 	sessionHandler *handler.SessionHandler,
+	aiHandler *handler.AIHandler,
 	wsHandler *websocket.Handler,
 ) {
 	// 健康检查
@@ -251,6 +254,13 @@ func registerRoutes(
 		sessions.GET("", sessionHandler.ListSessions)
 		sessions.GET("/:id", sessionHandler.GetSession)
 		sessions.DELETE("/:id", sessionHandler.DeleteSession)
+	}
+
+	// AI 相关（需要登录）
+	ai := v1.Group("/ai")
+	ai.Use(middleware.AuthMiddleware(jwtService, redisCache))
+	{
+		ai.POST("/generate-command", aiHandler.GenerateCommand)
 	}
 
 	// WebSocket 路由

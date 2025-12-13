@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { VIRTUAL_KEYS } from '../constants';
 
 interface Props {
@@ -7,6 +7,18 @@ interface Props {
 }
 
 const VirtualKeyboard: React.FC<Props> = ({ onKeyPress, activeModifier }) => {
+  const lastClickTime = useRef<number>(0);
+
+  const handleKeyPress = (e: React.MouseEvent | React.TouchEvent, key: string) => {
+    e.preventDefault();
+    const now = Date.now();
+    if (now - lastClickTime.current < 150) {
+      return; // Debounce fast clicks
+    }
+    lastClickTime.current = now;
+    onKeyPress(key);
+  };
+
   return (
     <div className="w-full bg-slate-900 border-t border-slate-800">
       <div className="flex overflow-x-auto py-2 px-2 gap-2 no-scrollbar scroll-smooth">
@@ -15,13 +27,10 @@ const VirtualKeyboard: React.FC<Props> = ({ onKeyPress, activeModifier }) => {
           return (
             <button
               key={key.label}
-              onClick={(e) => {
-                e.preventDefault();
-                onKeyPress(key.value);
-              }}
+              onClick={(e) => handleKeyPress(e, key.value)}
               className={`
                 flex-shrink-0 min-w-[3rem] h-9 px-2 rounded-md font-mono text-sm font-medium
-                active:scale-95 transition-transform select-none
+                active:scale-95 transition-transform select-none touch-manipulation
                 ${isActive 
                   ? 'bg-indigo-600 text-white shadow-[0_2px_0_0_rgba(67,56,202,1)] translate-y-[1px]' 
                   : ''}
