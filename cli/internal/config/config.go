@@ -29,6 +29,7 @@ type DeviceConfig struct {
 	DesktopToken string `mapstructure:"desktop_token"`  // 桌面专用 Token（用于 WS）
 	Name         string `mapstructure:"name"`           // 设备名称
 	ID           string `mapstructure:"id"`             // 设备 ID
+	Username     string `mapstructure:"username"`       // 用户名
 }
 
 var (
@@ -66,6 +67,7 @@ func Init() error {
 	viper.SetDefault("device.desktop_token", "")
 	viper.SetDefault("device.name", getHostname())
 	viper.SetDefault("device.id", "")
+	viper.SetDefault("device.username", "")
 
 	// 尝试读取配置文件
 	if err := viper.ReadInConfig(); err != nil {
@@ -92,12 +94,14 @@ func Get() *Config {
 }
 
 // SaveAuth 保存用户访问/刷新 Token
-func SaveAuth(accessToken, refreshToken string) error {
+func SaveAuth(accessToken, refreshToken, username string) error {
 	viper.Set("device.access_token", accessToken)
 	viper.Set("device.refresh_token", refreshToken)
+	viper.Set("device.username", username)
 	if cfg != nil {
 		cfg.Device.AccessToken = accessToken
 		cfg.Device.RefreshToken = refreshToken
+		cfg.Device.Username = username
 	}
 	return viper.WriteConfig()
 }
@@ -153,11 +157,13 @@ func ClearToken() error {
 	viper.Set("device.refresh_token", "")
 	viper.Set("device.desktop_token", "")
 	viper.Set("device.id", "")
+	viper.Set("device.username", "")
 	if cfg != nil {
 		cfg.Device.AccessToken = ""
 		cfg.Device.RefreshToken = ""
 		cfg.Device.DesktopToken = ""
 		cfg.Device.ID = ""
+		cfg.Device.Username = ""
 	}
 	return viper.WriteConfig()
 }

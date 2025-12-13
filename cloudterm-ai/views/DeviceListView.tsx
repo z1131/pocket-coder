@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Monitor, Server, MoreVertical, Wifi, WifiOff, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api, Device } from '../services/api';
+import { ws } from '../services/ws';
 import { useAuthStore, useAppStore } from '../store/useStore';
 
 const DeviceListView: React.FC = () => {
@@ -12,6 +13,12 @@ const DeviceListView: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Connect WebSocket globally when in device list to receive updates
+    const token = localStorage.getItem('token');
+    if (token) {
+      ws.connect();
+    }
+
     const loadDevices = async () => {
       try {
         const data = await api.desktop.list();
@@ -23,6 +30,27 @@ const DeviceListView: React.FC = () => {
       }
     };
     loadDevices();
+
+    // Listen for status updates
+    const offOnline = ws.on('desktop:online', (payload: any) => {
+      setDevices(prev => prev.map(d => 
+        d.id === payload.desktop_id ? { ...d, status: 'online' } : d
+      ));
+    });
+
+    const offOffline = ws.on('desktop:offline', (payload: any) => {
+      setDevices(prev => prev.map(d => 
+        d.id === payload.desktop_id ? { ...d, status: 'offline' } : d
+      ));
+    });
+
+    return () => {
+      offOnline();
+      offOffline();
+      // We don't disconnect here because we want to keep the connection alive for other views, 
+      // or we can disconnect if we want strict resource management, but for SPA it's usually fine.
+      // Ideally App.tsx handles the global connection.
+    };
   }, []);
 
   const handleLogout = () => {

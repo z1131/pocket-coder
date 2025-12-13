@@ -36,10 +36,16 @@ type APIResponse struct {
 }
 
 // --- 认证 ---
+type User struct {
+    ID       int64  `json:"id"`
+    Username string `json:"username"`
+}
+
 type LoginResponse struct {
     AccessToken  string `json:"access_token"`
     RefreshToken string `json:"refresh_token"`
     ExpiresIn    int64  `json:"expires_in"`
+    User         *User  `json:"user"`
 }
 
 // Login 使用用户名密码登录

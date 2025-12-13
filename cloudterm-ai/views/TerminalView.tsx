@@ -14,7 +14,15 @@ import AIAssistant from '../components/AIAssistant';
 const TerminalView: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [session, setSession] = useState<Session | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
+  
+  // Connection States
+  const [isWsConnected, setIsWsConnected] = useState(false); // Mobile <-> Server
+  const [isDesktopOnline, setIsDesktopOnline] = useState(false); // Desktop <-> Server
+  const [desktopName, setDesktopName] = useState('');
+  
+  // Computed final status for UI
+  const isConnected = isWsConnected && isDesktopOnline;
+
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
   
@@ -24,11 +32,23 @@ const TerminalView: React.FC = () => {
   const navigate = useNavigate();
   const { token } = useAuthStore();
 
-  // 1. Load Session Info
+  // 1. Load Session & Desktop Info
   useEffect(() => {
     if (!sessionId) return;
     api.session.get(Number(sessionId))
-      .then(setSession)
+      .then(res => {
+        setSession(res);
+        // Fetch desktop info to get name and initial status
+        if (res.desktop_id) {
+            api.desktop.get(res.desktop_id).then(d => {
+                setDesktopName(d.name);
+                setIsDesktopOnline(d.status === 'online');
+            }).catch(() => {
+              setDesktopName('Unknown Host');
+              setIsDesktopOnline(false);
+            });
+        }
+      })
       .catch(console.error);
   }, [sessionId]);
 
@@ -64,7 +84,7 @@ const TerminalView: React.FC = () => {
 
     // WS Event Handlers
     const offOpen = ws.on('open', () => {
-      setIsConnected(true);
+      setIsWsConnected(true);
       term.write('\x1b[32m\r\n[Connected to Server]\x1b[0m\r\n');
       
       // Request history
@@ -79,14 +99,13 @@ const TerminalView: React.FC = () => {
     });
 
     const offClose = ws.on('close', () => {
-      setIsConnected(false);
-      term.write('\x1b[31m\r\n[Disconnected]\x1b[0m\r\n');
+      setIsWsConnected(false);
+      term.write('\x1b[31m\r\n[Disconnected from Server]\x1b[0m\r\n');
     });
 
     const offOutput = ws.on('terminal:output', (payload: any) => {
       if (payload.session_id === Number(sessionId) && payload.data) {
         try {
-          // Decode Base64 (Standard JS atob)
           const text = atob(payload.data);
           term.write(text);
         } catch (e) {
@@ -104,6 +123,20 @@ const TerminalView: React.FC = () => {
        }
     });
 
+    const offOffline = ws.on('desktop:offline', (payload: any) => {
+      if (session && payload.desktop_id === session.desktop_id) {
+          term.write('\x1b[31m\r\n[Desktop Disconnected]\x1b[0m\r\n');
+          setIsDesktopOnline(false);
+      }
+    });
+
+    const offOnline = ws.on('desktop:online', (payload: any) => {
+      if (session && payload.desktop_id === session.desktop_id) {
+           term.write('\x1b[32m\r\n[Desktop Reconnected]\x1b[0m\r\n');
+           setIsDesktopOnline(true);
+      }
+    });
+
     // Terminal Input
     term.onData((data) => {
       if (!ws) return;
@@ -119,7 +152,7 @@ const TerminalView: React.FC = () => {
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
       if (ws) {
-        ws.send('terminal:resize', { 
+        ws.send('terminal:resize', {
           session_id: Number(sessionId),
           cols: term.cols, 
           rows: term.rows 
@@ -133,11 +166,13 @@ const TerminalView: React.FC = () => {
       offClose();
       offOutput();
       offHistory();
+      offOffline();
+      offOnline();
       resizeObserver.disconnect();
       term.dispose();
       ws.disconnect();
     };
-  }, [token, sessionId, session]);
+  }, [token, sessionId, session]); // Re-run if session info (desktop_id) loads
 
   // Handle Input Bar (Quick Command)
   const handleQuickCommand = (e: React.FormEvent) => {
@@ -196,9 +231,11 @@ const TerminalView: React.FC = () => {
             <ArrowLeft size={18} />
           </button>
           <div className="flex flex-col">
-            <span className="font-semibold text-slate-200 text-sm leading-tight">Session #{session.id}</span>
+            <span className="font-semibold text-slate-200 text-sm leading-tight">
+                {session.is_default ? (desktopName || 'Terminal') : (session.agent_type || 'Session')}
+            </span>
             <span className="text-[10px] text-slate-500 leading-tight">
-              {session.is_default ? 'Default Terminal' : 'Background Task'}
+              {session.is_default ? 'Local Shell' : `Session #${session.id}`}
             </span>
           </div>
         </div>
@@ -211,7 +248,7 @@ const TerminalView: React.FC = () => {
               <WifiOff size={14} className="text-red-400 animate-pulse" />
             )}
             <span className={`text-xs font-mono ${isConnected ? 'text-emerald-400' : 'text-slate-400'}`}>
-              {isConnected ? 'Connected' : 'Offline'}
+              {isConnected ? 'Connected' : (isWsConnected ? 'Desktop Offline' : 'Offline')}
             </span>
           </div>
         </div>
@@ -241,14 +278,15 @@ const TerminalView: React.FC = () => {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               className="w-full bg-slate-800 text-white font-mono text-sm rounded-lg pl-8 pr-10 py-2.5 border border-slate-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all placeholder:text-slate-600"
-              placeholder="Quick command..."
+              placeholder={isConnected ? "Quick command..." : "Disconnected"}
+              disabled={!isConnected}
               autoComplete="off"
             />
             <button 
               type="submit"
-              disabled={!inputValue}
+              disabled={!inputValue || !isConnected}
               className={`absolute right-1 p-1.5 rounded-md transition-all ${ 
-                inputValue ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-600'
+                inputValue && isConnected ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-600'
               }`}
             >
               {inputValue ? <Send size={16} /> : <Command size={16} />}
@@ -262,7 +300,6 @@ const TerminalView: React.FC = () => {
         onClose={() => setIsAiOpen(false)} 
         onApplyCommand={(cmd) => {
           setInputValue(cmd);
-          // Auto send? or let user confirm. Let's populate input.
         }}
       />
     </div>

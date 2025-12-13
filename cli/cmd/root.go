@@ -67,11 +67,17 @@ func runInteractive(cmd *cobra.Command, args []string) {
 	// 检查是否已登录
 	desktopToken := config.GetDesktopToken()
 	if desktopToken != "" {
-		fmt.Println("检测到已保存的登录信息")
-		fmt.Printf("  设备 ID: %s\n", config.GetDesktopID())
+		fmt.Println("检测到有效的登录凭证：")
+		username := config.Get().Device.Username
+		if username == "" {
+			username = "未知用户"
+		}
+		fmt.Printf("  👤 用户: %s\n", username)
+		fmt.Printf("  💻 设备: %s (ID: %s)\n", config.Get().Device.Name, config.GetDesktopID())
+		fmt.Printf("  🌐 服务器: %s\n", config.GetServerURL())
 		fmt.Println()
 
-		if askYesNo("是否使用已保存的登录信息？") {
+		if askYesNo("是否直接连接？") {
 			startWebSocket()
 			return
 		}
@@ -137,7 +143,7 @@ func doInteractiveLogin() {
 		os.Exit(1)
 	}
 
-	if err := config.SaveAuth(loginResp.AccessToken, loginResp.RefreshToken); err != nil {
+	if err := config.SaveAuth(loginResp.AccessToken, loginResp.RefreshToken, loginResp.User.Username); err != nil {
 		fmt.Fprintf(os.Stderr, "✗ 保存登录信息失败: %v\n", err)
 		os.Exit(1)
 	}

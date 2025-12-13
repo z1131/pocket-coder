@@ -89,15 +89,26 @@ func (h *Hub) registerClient(client *Client) {
 		log.Printf("Mobile client registered: userID=%d", client.userID)
 
 	case ClientTypeDesktop:
-		// 检查 ProcessID
-		if client.processID != "" {
-			oldPID, _ := h.cache.GetDesktopProcessID(context.Background(), client.desktopID)
-			if oldPID != "" && oldPID != client.processID {
-				// 进程 ID 变更，清理所有活跃会话
-				log.Printf("Process ID changed from %s to %s, resetting sessions...", oldPID, client.processID)
-				if err := h.sessionService.ResetSessions(context.Background(), client.desktopID); err != nil {
-					log.Printf("Failed to reset sessions: %v", err)
-				}
+		// 检查 ProcessID 以决定是否重置会话
+		oldPID, _ := h.cache.GetDesktopProcessID(context.Background(), client.desktopID)
+		
+		shouldReset := false
+		if oldPID == "" {
+			// Redis 中无记录（可能是过期或首次连接），安全起见视为新会话
+			log.Printf("No previous PID found for desktop %d, treating as new session...", client.desktopID)
+			shouldReset = true
+		} else if oldPID != client.processID {
+			// PID 变更，明确为重启
+			log.Printf("Process ID changed from %s to %s, resetting sessions...", oldPID, client.processID)
+			shouldReset = true
+		} else {
+			// PID 相同，视为断网重连，保持会话
+			log.Printf("Process ID matched (%s), resuming session...", client.processID)
+		}
+
+		if shouldReset {
+			if err := h.sessionService.ResetSessions(context.Background(), client.desktopID); err != nil {
+				log.Printf("Failed to reset sessions: %v", err)
 			}
 		}
 
