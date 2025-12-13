@@ -27,25 +27,14 @@ const TerminalView: React.FC = () => {
   // 1. Load Session Info
   useEffect(() => {
     if (!sessionId) return;
-    console.log('Fetching session info for ID:', sessionId);
     api.session.get(Number(sessionId))
-      .then(res => {
-        console.log('Session loaded:', res);
-        setSession(res);
-      })
-      .catch(err => console.error('Session load error:', err));
+      .then(setSession)
+      .catch(console.error);
   }, [sessionId]);
 
   // 2. Init Xterm & WebSocket
   useEffect(() => {
-    console.log('TerminalView Effect Triggered', { token: !!token, sessionId, hasRef: !!terminalRef.current });
-    
-    if (!token || !sessionId || !terminalRef.current) {
-      console.warn('Missing dependencies for terminal init');
-      return;
-    }
-
-    console.log('Initializing Terminal...');
+    if (!token || !sessionId || !terminalRef.current) return;
 
     // Init Terminal
     const term = new Terminal({
