@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "mysql": {
+      "command": "uv",
+      "args": [
+        "--directory", 
+        "/Users/zhangzihao/mcp_tool/mysql_mcp_server",
+        "run",
+        "mysql_mcp_server"
+      ],
+      "env": {
+        "MYSQL_HOST": "rm-bp1tbjfarup52kbpbao.mysql.rds.aliyuncs.com",
+        "MYSQL_PORT": "3306",
+        "MYSQL_USER": "pocket_coder",
+        "MYSQL_PASSWORD": "Aa1231231212123",
+        "MYSQL_DATABASE": "pocket_coder"
+      }
+    }
+  }
+}

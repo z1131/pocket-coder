@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"time"
 
@@ -13,7 +14,8 @@ import (
 
 // SessionNotifier 会话通知接口
 type SessionNotifier interface {
-	NotifySessionCreate(desktopID int64, sessionID int64, workingDir string)
+	NotifySessionCreate(desktopID int64, sessionID int64, workingDir string, isDefault bool)
+	NotifySessionClose(desktopID int64, sessionID int64)
 }
 
 // 会话服务相关错误
@@ -26,23 +28,19 @@ var (
 // 处理用户与 AI 的对话会话
 type SessionService struct {
 	sessionRepo *repository.SessionRepository // 会话数据访问层
-	messageRepo *repository.MessageRepository // 消息数据访问层
 	desktopRepo *repository.DesktopRepository // 设备数据访问层
 	cache       *cache.RedisCache             // Redis 缓存
-	aiService   *AIService                    // AI 服务（可选）
 	notifier    SessionNotifier               // 会话通知器
 }
 
 // NewSessionService 创建 SessionService 实例
 func NewSessionService(
 	sessionRepo *repository.SessionRepository,
-	messageRepo *repository.MessageRepository,
 	desktopRepo *repository.DesktopRepository,
 	cache *cache.RedisCache,
 ) *SessionService {
 	return &SessionService{
 		sessionRepo: sessionRepo,
-		messageRepo: messageRepo,
 		desktopRepo: desktopRepo,
 		cache:       cache,
 	}
@@ -53,56 +51,34 @@ func (s *SessionService) SetNotifier(n SessionNotifier) {
 	s.notifier = n
 }
 
-// SetAIService 设置 AI 服务
-func (s *SessionService) SetAIService(aiService *AIService) {
-	s.aiService = aiService
-}
-
 // SessionResponse 会话响应
 type SessionResponse struct {
-	ID         int64   `json:"id"`
-	DesktopID  int64   `json:"desktop_id"`
-	AgentType  string  `json:"agent_type"`
+	ID        int64   `json:"id"`
+	DesktopID int64   `json:"desktop_id"`
+	AgentType string  `json:"agent_type"`
+	IsDefault bool    `json:"is_default"` // 是否为默认会话
 	WorkingDir *string `json:"working_dir,omitempty"`
-	Title      *string `json:"title,omitempty"`
-	Summary    *string `json:"summary,omitempty"`
-	Status     string  `json:"status"`
-	StartedAt  string  `json:"started_at"`
-	EndedAt    *string `json:"ended_at,omitempty"`
+	Title     *string `json:"title,omitempty"`
+	Preview   *string `json:"preview,omitempty"` // Base64 编码的最近输出
+	Status    string  `json:"status"`
+	StartedAt string  `json:"started_at"`
+	EndedAt   *string `json:"ended_at,omitempty"`
 }
 
-// SessionDetailResponse 会话详情响应（包含消息）
+// SessionDetailResponse 会话详情响应
 type SessionDetailResponse struct {
-	Session  SessionResponse   `json:"session"`
-	Messages []MessageResponse `json:"messages"`
-}
-
-// MessageResponse 消息响应
-type MessageResponse struct {
-	ID        int64  `json:"id"`
-	Role      string `json:"role"`
-	Content   string `json:"content"`
-	CreatedAt string `json:"created_at"`
+	Session SessionResponse `json:"session"`
 }
 
 // CreateSessionRequest 创建会话请求
 type CreateSessionRequest struct {
-	DesktopID  int64   `json:"desktop_id"`  // 设备ID
-	WorkingDir *string `json:"working_dir"` // 工作目录（可选）
+	DesktopID  int64   `json:"desktop_id"`             // 设备ID
+	WorkingDir *string `json:"working_dir"`            // 工作目录（可选）
+	IsDefault *bool   `json:"is_default" json:"-"`          // 是否为默认会话（由服务端控制）
 }
 
 // CreateSession 创建新会话
-// 参数:
-//   - ctx: 上下文
-//   - userID: 用户ID（用于权限验证）
-//   - desktopID: 设备ID
-//   - req: 创建请求
-//
-// 返回:
-//   - *SessionResponse: 创建的会话
-//   - error: 操作错误
 func (s *SessionService) CreateSession(ctx context.Context, userID, desktopID int64, req *CreateSessionRequest) (*SessionResponse, error) {
-	// 1. 获取设备信息
 	desktop, err := s.desktopRepo.GetByID(ctx, desktopID)
 	if err != nil {
 		return nil, err
@@ -110,67 +86,48 @@ func (s *SessionService) CreateSession(ctx context.Context, userID, desktopID in
 	if desktop == nil {
 		return nil, ErrDesktopNotFound
 	}
-
-	// 2. 验证权限
 	if desktop.UserID != userID {
 		return nil, ErrNoPermission
 	}
 
-	// 3. (已移除) 不再强制结束之前的活跃会话，支持多会话并存
-	// if err := s.sessionRepo.EndAllActiveByDesktopID(ctx, desktopID); err != nil {
-	// 	return nil, err
-	// }
-
-	// 4. 创建新会话
-	session := &model.Session{
-		DesktopID: desktopID,
-		AgentType: desktop.AgentType,
-		Status:    model.SessionStatusActive,
+	// 手机端 API 创建的会话默认都是非默认会话
+	isDefault := false
+	// 如果是 EnsureDefaultSession 调用，会通过 req.IsDefault 传入 true
+	if req != nil && req.IsDefault != nil {
+		isDefault = *req.IsDefault
 	}
 
-	// 设置工作目录：优先使用请求中的，否则使用设备的
+	session := &model.Session{
+		DesktopID: desktopID,
+		AgentType: "claude-code", // 默认值，后续可由 Client 指定
+		Status:    model.SessionStatusActive,
+		IsDefault: isDefault,
+	}
 	if req != nil && req.WorkingDir != nil {
 		session.WorkingDir = req.WorkingDir
-	} else {
-		session.WorkingDir = desktop.WorkingDir
 	}
 
 	if err := s.sessionRepo.Create(ctx, session); err != nil {
 		return nil, err
 	}
 
-	// 5. 更新 Redis 中的活跃会话
 	if err := s.cache.SetActiveSession(ctx, desktopID, session.ID); err != nil {
-		// 非致命错误，记录日志但不返回错误
+		// Non-fatal error
 	}
 
-	// 6. 通知 Agent 创建会话
 	if s.notifier != nil {
 		wd := ""
 		if session.WorkingDir != nil {
 			wd = *session.WorkingDir
 		}
-		// 异步通知，避免阻塞
-		go s.notifier.NotifySessionCreate(desktopID, session.ID, wd)
+		go s.notifier.NotifySessionCreate(desktopID, session.ID, wd, isDefault)
 	}
 
 	return s.toSessionResponse(session), nil
 }
 
 // ListSessions 获取设备的会话列表
-// 参数:
-//   - ctx: 上下文
-//   - userID: 用户ID（用于权限验证）
-//   - desktopID: 设备ID
-//   - page: 页码（从 1 开始）
-//   - pageSize: 每页数量
-//
-// 返回:
-//   - []SessionResponse: 会话列表
-//   - int64: 总数量
-//   - error: 操作错误
 func (s *SessionService) ListSessions(ctx context.Context, userID, desktopID int64, page, pageSize int) ([]SessionResponse, int64, error) {
-	// 1. 获取设备并验证权限
 	desktop, err := s.desktopRepo.GetByID(ctx, desktopID)
 	if err != nil {
 		return nil, 0, err
@@ -182,32 +139,29 @@ func (s *SessionService) ListSessions(ctx context.Context, userID, desktopID int
 		return nil, 0, ErrNoPermission
 	}
 
-	// 2. 分页获取会话
 	sessions, total, err := s.sessionRepo.GetByDesktopIDWithPagination(ctx, desktopID, page, pageSize)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// 3. 转换为响应格式
 	result := make([]SessionResponse, len(sessions))
 	for i, session := range sessions {
-		result[i] = *s.toSessionResponse(&session)
-	}
+		resp := s.toSessionResponse(&session)
 
+		// 获取预览数据（最近 1KB）
+		tail, err := s.cache.GetTerminalHistoryTail(ctx, session.ID, 1024)
+		if err == nil && len(tail) > 0 {
+			encoded := base64.StdEncoding.EncodeToString(tail)
+			resp.Preview = &encoded
+		}
+		
+		result[i] = *resp
+	}
 	return result, total, nil
 }
 
-// GetSession 获取会话详情（包含消息）
-// 参数:
-//   - ctx: 上下文
-//   - userID: 用户ID（用于权限验证）
-//   - sessionID: 会话ID
-//
-// 返回:
-//   - *SessionDetailResponse: 会话详情（包含消息历史）
-//   - error: 操作错误
+// GetSession 获取会话详情
 func (s *SessionService) GetSession(ctx context.Context, userID, sessionID int64) (*SessionDetailResponse, error) {
-	// 1. 获取会话（包含设备信息）
 	session, err := s.sessionRepo.GetByIDWithDesktop(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -215,46 +169,17 @@ func (s *SessionService) GetSession(ctx context.Context, userID, sessionID int64
 	if session == nil {
 		return nil, ErrSessionNotFound
 	}
-
-	// 2. 验证权限
 	if session.Desktop == nil || session.Desktop.UserID != userID {
 		return nil, ErrNoPermission
 	}
 
-	// 3. 获取消息历史
-	messages, err := s.messageRepo.GetBySessionID(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-
-	// 4. 构建响应
-	messageResponses := make([]MessageResponse, len(messages))
-	for i, msg := range messages {
-		messageResponses[i] = MessageResponse{
-			ID:        msg.ID,
-			Role:      msg.Role,
-			Content:   msg.Content,
-			CreatedAt: msg.CreatedAt.Format(time.RFC3339),
-		}
-	}
-
 	return &SessionDetailResponse{
-		Session:  *s.toSessionResponse(session),
-		Messages: messageResponses,
+		Session: *s.toSessionResponse(session),
 	}, nil
 }
 
 // GetActiveSession 获取设备的当前活跃会话
-// 参数:
-//   - ctx: 上下文
-//   - userID: 用户ID（用于权限验证）
-//   - desktopID: 设备ID
-//
-// 返回:
-//   - *SessionResponse: 活跃会话，如果没有返回 nil
-//   - error: 操作错误
 func (s *SessionService) GetActiveSession(ctx context.Context, userID, desktopID int64) (*SessionResponse, error) {
-	// 1. 验证权限
 	desktop, err := s.desktopRepo.GetByID(ctx, desktopID)
 	if err != nil {
 		return nil, err
@@ -266,7 +191,6 @@ func (s *SessionService) GetActiveSession(ctx context.Context, userID, desktopID
 		return nil, ErrNoPermission
 	}
 
-	// 2. 先从 Redis 缓存获取
 	sessionID, err := s.cache.GetActiveSession(ctx, desktopID)
 	if err != nil {
 		return nil, err
@@ -274,38 +198,25 @@ func (s *SessionService) GetActiveSession(ctx context.Context, userID, desktopID
 
 	var session *model.Session
 	if sessionID > 0 {
-		// 从数据库获取会话详情
 		session, err = s.sessionRepo.GetByID(ctx, sessionID)
 		if err != nil {
 			return nil, err
 		}
 	}
-
-	// 3. 如果缓存没有，从数据库查询
 	if session == nil {
 		session, err = s.sessionRepo.GetActiveByDesktopID(ctx, desktopID)
 		if err != nil {
 			return nil, err
 		}
 	}
-
 	if session == nil {
-		return nil, nil // 没有活跃会话
+		return nil, nil
 	}
-
 	return s.toSessionResponse(session), nil
 }
 
-// EndSession 结束会话
-// 参数:
-//   - ctx: 上下文
-//   - userID: 用户ID（用于权限验证）
-//   - sessionID: 会话ID
-//
-// 返回:
-//   - error: 操作错误
+// EndSession 结束会话 (软删除 + 通知关闭 + 归档日志)
 func (s *SessionService) EndSession(ctx context.Context, userID, sessionID int64) error {
-	// 1. 获取会话
 	session, err := s.sessionRepo.GetByIDWithDesktop(ctx, sessionID)
 	if err != nil {
 		return err
@@ -313,103 +224,44 @@ func (s *SessionService) EndSession(ctx context.Context, userID, sessionID int64
 	if session == nil {
 		return ErrSessionNotFound
 	}
-
-	// 2. 验证权限
 	if session.Desktop == nil || session.Desktop.UserID != userID {
 		return ErrNoPermission
 	}
-
-	// 3. 如果已经结束，直接返回
 	if session.Status == model.SessionStatusEnded {
-		return nil
+		return nil // 已经结束，无需重复操作
 	}
 
-	// 4. 结束会话
+	// 1. 更新数据库状态为 ended
 	if err := s.sessionRepo.EndSession(ctx, sessionID); err != nil {
 		return err
 	}
 
-	// 5. 异步生成 AI 总结（不阻塞返回）
+	// 2. 清除 Redis 活跃会话状态
+	_ = s.cache.ClearActiveSession(ctx, session.DesktopID)
+
+	// 3. 异步归档日志并通知 CLI 关闭
 	go func() {
-		if err := s.GenerateSummary(context.Background(), sessionID); err != nil {
-			// 记录错误但不影响主流程
-			// log.Printf("Failed to generate session summary: %v", err)
+		// 通知 CLI 关闭终端
+		if s.notifier != nil {
+			s.notifier.NotifySessionClose(session.DesktopID, sessionID)
 		}
+
+		// 归档日志：从 Redis 读取并存储到 LogDump
+		history, err := s.cache.GetTerminalHistory(ctx, sessionID)
+		if err == nil && len(history) > 0 {
+			logContent := string(history)
+			_ = s.sessionRepo.UpdateLogDump(ctx, sessionID, logContent) // 存储到数据库
+		}
+		_ = s.cache.ClearTerminalHistory(ctx, sessionID) // 清除 Redis 历史
 	}()
 
-	// 6. 清除 Redis 缓存中的活跃会话
-	return s.cache.ClearActiveSession(ctx, session.DesktopID)
+	return nil
 }
 
-// DeleteSession 删除会话
-// 参数:
-//   - ctx: 上下文
-//   - userID: 用户ID（用于权限验证）
-//   - sessionID: 会话ID
-//
-// 返回:
-//   - error: 操作错误
+// DeleteSession 删除会话 (改为调用 EndSession，实现软删除)
 func (s *SessionService) DeleteSession(ctx context.Context, userID, sessionID int64) error {
-	// 1. 获取会话
-	session, err := s.sessionRepo.GetByIDWithDesktop(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	if session == nil {
-		return ErrSessionNotFound
-	}
-
-	// 2. 验证权限
-	if session.Desktop == nil || session.Desktop.UserID != userID {
-		return ErrNoPermission
-	}
-
-	// 3. 如果是活跃会话，先清除缓存
-	if session.Status == model.SessionStatusActive {
-		_ = s.cache.ClearActiveSession(ctx, session.DesktopID)
-	}
-
-	// 4. 删除会话（级联删除消息）
-	return s.sessionRepo.Delete(ctx, sessionID)
-}
-
-// AddMessage 添加消息到会话
-// 参数:
-//   - ctx: 上下文
-//   - sessionID: 会话ID
-//   - role: 消息角色（user/assistant/system）
-//   - content: 消息内容
-//
-// 返回:
-//   - *model.Message: 创建的消息
-//   - error: 操作错误
-func (s *SessionService) AddMessage(ctx context.Context, sessionID int64, role, content string) (*model.Message, error) {
-	// 1. 检查会话是否存在
-	session, err := s.sessionRepo.GetByID(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	if session == nil {
-		return nil, ErrSessionNotFound
-	}
-
-	// 2. 检查会话是否已结束
-	if session.Status == model.SessionStatusEnded {
-		return nil, ErrSessionEnded
-	}
-
-	// 3. 创建消息
-	message := &model.Message{
-		SessionID: sessionID,
-		Role:      role,
-		Content:   content,
-	}
-
-	if err := s.messageRepo.Create(ctx, message); err != nil {
-		return nil, err
-	}
-
-	return message, nil
+	// 实际上是结束会话，而不是硬删除
+	return s.EndSession(ctx, userID, sessionID)
 }
 
 // GetSessionByID 获取会话（内部使用，不验证权限）
@@ -417,136 +269,50 @@ func (s *SessionService) GetSessionByID(ctx context.Context, sessionID int64) (*
 	return s.sessionRepo.GetByID(ctx, sessionID)
 }
 
-// GetMessages 获取会话消息列表
-// 参数:
-//   - ctx: 上下文
-//   - userID: 用户ID（用于权限验证）
-//   - sessionID: 会话ID
-//
-// 返回:
-//   - []MessageResponse: 消息列表
-//   - error: 获取失败返回错误
-func (s *SessionService) GetMessages(ctx context.Context, userID, sessionID int64) ([]MessageResponse, error) {
-	// 1. 获取会话
-	session, err := s.sessionRepo.GetByID(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	if session == nil {
-		return nil, ErrSessionNotFound
-	}
-
-	// 2. 通过 Desktop 验证权限
-	desktop, err := s.desktopRepo.GetByID(ctx, session.DesktopID)
-	if err != nil {
-		return nil, err
-	}
-	if desktop == nil || desktop.UserID != userID {
-		return nil, ErrNoPermission
-	}
-
-	// 3. 获取消息列表
-	messages, err := s.messageRepo.GetBySessionID(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-
-	// 4. 转换为响应格式
-	result := make([]MessageResponse, len(messages))
-	for i, msg := range messages {
-		result[i] = MessageResponse{
-			ID:        msg.ID,
-			Role:      msg.Role,
-			Content:   msg.Content,
-			CreatedAt: msg.CreatedAt.Format(time.RFC3339),
-		}
-	}
-
-	return result, nil
-}
-
 // toSessionResponse 将会话模型转换为响应格式
 func (s *SessionService) toSessionResponse(session *model.Session) *SessionResponse {
 	resp := &SessionResponse{
-		ID:         session.ID,
-		DesktopID:  session.DesktopID,
-		AgentType:  session.AgentType,
+		ID:        session.ID,
+		DesktopID: session.DesktopID,
+		AgentType: session.AgentType,
+		IsDefault: session.IsDefault, // 使用 IsDefault
 		WorkingDir: session.WorkingDir,
-		Title:      session.Title,
-		Summary:    session.Summary,
-		Status:     session.Status,
-		StartedAt:  session.StartedAt.Format(time.RFC3339),
+		Title:     session.Title,
+		Status:    session.Status,
+		StartedAt: session.StartedAt.Format(time.RFC3339),
 	}
-
 	if session.EndedAt != nil {
 		formatted := session.EndedAt.Format(time.RFC3339)
 		resp.EndedAt = &formatted
 	}
-
 	return resp
 }
 
-// GenerateSummary 为会话生成 AI 总结
-// 参数:
-//   - ctx: 上下文
-//   - sessionID: 会话ID
-//
-// 返回:
-//   - error: 操作错误
-func (s *SessionService) GenerateSummary(ctx context.Context, sessionID int64) error {
-	if s.aiService == nil {
-		return nil // AI 服务未配置，跳过
-	}
-
-	// 获取会话消息
-	messages, err := s.messageRepo.GetBySessionID(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-
-	if len(messages) == 0 {
-		return nil // 没有消息，跳过
-	}
-
-	// 转换为 AI 服务需要的格式
-	msgList := make([]map[string]string, len(messages))
-	for i, msg := range messages {
-		msgList[i] = map[string]string{
-			"role":    msg.Role,
-			"content": msg.Content,
-		}
-	}
-
-	// 调用 AI 生成总结
-	summary, err := s.aiService.GenerateSessionSummary(ctx, msgList)
-	if err != nil {
-		return err
-	}
-
-	// 更新会话
-	return s.sessionRepo.UpdateSummary(ctx, sessionID, summary.Title, summary.Summary)
-}
-
-// EnsureDefaultSession 确保设备有活跃会话（用于 Agent 连入时）
-// 参数:
-//   - ctx: 上下文
-//   - userID: 用户ID
-//   - desktopID: 设备ID
-//
-// 返回:
-//   - *SessionResponse: 活跃会话
-//   - error: 操作错误
+// EnsureDefaultSession 确保设备有活跃的默认会话（用于 Agent 连入时）
 func (s *SessionService) EnsureDefaultSession(ctx context.Context, userID, desktopID int64) (*SessionResponse, error) {
-	// 1. 尝试获取现有的活跃会话
-	session, err := s.GetActiveSession(ctx, userID, desktopID)
+	// 1. 查找是否存在活跃的默认会话
+	activeDefaultSession, err := s.sessionRepo.GetActiveDefaultSessionByDesktopID(ctx, desktopID) // 需要实现这个方法
 	if err != nil {
 		return nil, err
 	}
-
-	if session != nil {
-		return session, nil
+	if activeDefaultSession != nil {
+		return s.toSessionResponse(activeDefaultSession), nil
 	}
 
-	// 2. 如果没有，创建一个新的
-	return s.CreateSession(ctx, userID, desktopID, nil)
+	// 2. 如果不存在，则创建一个新的默认会话
+	isDefault := true
+	return s.CreateSession(ctx, userID, desktopID, &CreateSessionRequest{
+		DesktopID: desktopID,
+		IsDefault: &isDefault,
+	})
+}
+
+// ResetSessions 重置设备的所有会话（用于 CLI 重启时清理旧会话）
+func (s *SessionService) ResetSessions(ctx context.Context, desktopID int64) error {
+	// 1. 结束所有活跃会话
+	if err := s.sessionRepo.EndAllActiveByDesktopID(ctx, desktopID); err != nil {
+		return err
+	}
+	// 2. 清除 Redis 活跃会话状态
+	return s.cache.ClearActiveSession(ctx, desktopID)
 }

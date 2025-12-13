@@ -69,7 +69,7 @@ func (h *Handler) HandleMobileWS(c *gin.Context) {
 	}
 
 	// 创建客户端
-	client := NewClient(h.hub, conn, ClientTypeMobile, claims.UserID, 0)
+	client := NewClient(h.hub, conn, ClientTypeMobile, claims.UserID, 0, "")
 
 	// 注册客户端
 	h.hub.Register(client)
@@ -118,8 +118,11 @@ func (h *Handler) HandleDesktopWS(c *gin.Context) {
 		return
 	}
 
+	// 获取 Process ID
+	pid := c.Query("pid")
+
 	// 创建客户端
-	client := NewClient(h.hub, conn, ClientTypeDesktop, claims.UserID, claims.DesktopID)
+	client := NewClient(h.hub, conn, ClientTypeDesktop, claims.UserID, claims.DesktopID, pid)
 
 	// 注册客户端
 	h.hub.Register(client)

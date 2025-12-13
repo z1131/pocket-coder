@@ -54,6 +54,8 @@ func (h *AuthHandler) Register(c *gin.Context) {
 			response.UserExists(c)
 		case service.ErrEmailExists:
 			response.ErrorWithCode(c, 400, response.CodeBadRequest, "邮箱已被注册")
+		case service.ErrPhoneExists:
+			response.ErrorWithCode(c, 400, response.CodeBadRequest, "手机号已被注册")
 		default:
 			response.InternalError(c, "注册失败")
 		}
@@ -159,109 +161,6 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 // RefreshTokenRequest 刷新 Token 请求
 type RefreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
-}
-
-// RequestDeviceCode 请求设备授权码
-// @Summary 请求设备授权码
-// @Description 电脑端调用，获取设备授权码
-// @Tags 设备认证
-// @Accept json
-// @Produce json
-// @Param body body service.DeviceCodeRequest true "设备信息"
-// @Success 200 {object} response.Response{data=service.DeviceCodeResponse}
-// @Router /api/auth/device/code [post]
-func (h *AuthHandler) RequestDeviceCode(c *gin.Context) {
-	var req service.DeviceCodeRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "请求参数错误")
-		return
-	}
-
-	result, err := h.authService.RequestDeviceCode(c.Request.Context(), &req)
-	if err != nil {
-		response.InternalError(c, "获取设备码失败")
-		return
-	}
-
-	response.Success(c, result)
-}
-
-// GetDeviceStatus 获取设备授权状态
-// @Summary 获取设备授权状态
-// @Description 电脑端轮询调用，检查是否已被授权
-// @Tags 设备认证
-// @Produce json
-// @Param device_code query string true "设备码"
-// @Success 200 {object} response.Response{data=service.DeviceStatusResponse}
-// @Success 202 {object} response.Response{data=service.DeviceStatusResponse} "等待授权"
-// @Success 410 {object} response.Response "授权码已过期"
-// @Router /api/auth/device/status [get]
-func (h *AuthHandler) GetDeviceStatus(c *gin.Context) {
-	deviceCode := c.Query("device_code")
-	if deviceCode == "" {
-		response.BadRequest(c, "缺少 device_code 参数")
-		return
-	}
-
-	result, err := h.authService.GetDeviceStatus(c.Request.Context(), deviceCode)
-	if err != nil {
-		if err == service.ErrDeviceCodeNotFound {
-			response.DeviceCodeExpired(c)
-			return
-		}
-		response.InternalError(c, "获取授权状态失败")
-		return
-	}
-
-	// 如果还在等待授权，返回 202 状态码
-	if result.Status == "pending" {
-		response.Accepted(c, result)
-		return
-	}
-
-	response.Success(c, result)
-}
-
-// AuthorizeDevice 授权设备
-// @Summary 授权设备
-// @Description 手机端用户输入用户码，授权设备
-// @Tags 设备认证
-// @Security Bearer
-// @Accept json
-// @Produce json
-// @Param body body AuthorizeDeviceRequest true "用户码"
-// @Success 200 {object} response.Response
-// @Router /api/auth/device/authorize [post]
-func (h *AuthHandler) AuthorizeDevice(c *gin.Context) {
-	// 从上下文获取用户 ID（由认证中间件设置）
-	userID, exists := c.Get("user_id")
-	if !exists {
-		response.Unauthorized(c, "请先登录")
-		return
-	}
-
-	var req AuthorizeDeviceRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "请求参数错误")
-		return
-	}
-
-	err := h.authService.AuthorizeDevice(c.Request.Context(), userID.(int64), req.UserCode)
-	if err != nil {
-		if err == service.ErrInvalidUserCode {
-			response.BadRequest(c, "用户码无效或已过期")
-			return
-		}
-		response.InternalError(c, "授权失败")
-		return
-	}
-
-	response.SuccessWithMessage(c, "授权成功", nil)
-}
-
-// AuthorizeDeviceRequest 授权设备请求
-type AuthorizeDeviceRequest struct {
-	UserCode string `json:"user_code" binding:"required"`
 }
 
 // hashToken 计算 Token 哈希

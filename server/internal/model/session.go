@@ -33,8 +33,14 @@ type Session struct {
 	// Title 会话标题，由 AI 根据对话内容生成
 	Title *string `gorm:"size:200" json:"title,omitempty"`
 
-	// Summary 会话摘要，由 AI 根据对话内容生成，不超过100字
-	Summary *string `gorm:"size:500" json:"summary,omitempty"`
+	// IsDefault 是否为默认会话（物理终端绑定）
+	// true: 占用电脑物理终端，多端共享，CLI 启动时自动创建
+	// false: 后台独立 PTY，手机端可创建
+	IsDefault bool `gorm:"default:false" json:"is_default"`
+
+	// LogDump 归档的终端日志（Redis 转储）
+	// 不直接通过 JSON 返回给前端列表，太大
+	LogDump *string `gorm:"type:longtext" json:"-"`
 
 	// Status 会话状态
 	// active: 活跃中，可以继续对话

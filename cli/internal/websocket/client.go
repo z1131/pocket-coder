@@ -27,6 +27,7 @@ const (
 
 	// 服务端 -> 客户端
 	TypeSessionCreate = "session:create" // 创建新会话
+	TypeSessionClose  = "session:close"  // 关闭会话
 
 	// 旧类型（兼容）
 	TypeCommand  = "command"  // 来自手机的指令
@@ -65,11 +66,12 @@ type Client struct {
 // serverURL: HTTP 服务器地址（如 http://localhost:8080）
 // token: 访问令牌
 // desktopID: 桌面设备 ID
-func NewClient(serverURL, token, desktopID string) *Client {
+// processID: 进程唯一标识（用于区分重启）
+func NewClient(serverURL, token, desktopID, processID string) *Client {
 	// 将 HTTP URL 转换为 WebSocket URL
 	wsURL := strings.Replace(serverURL, "http://", "ws://", 1)
 	wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
-	wsURL = fmt.Sprintf("%s/ws/desktop?token=%s&desktop_id=%s", wsURL, token, desktopID)
+	wsURL = fmt.Sprintf("%s/ws/desktop?token=%s&desktop_id=%s&pid=%s", wsURL, token, desktopID, processID)
 
 	return &Client{
 		serverURL: wsURL,

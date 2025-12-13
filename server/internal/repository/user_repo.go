@@ -171,3 +171,23 @@ func (r *UserRepository) ExistsByEmail(ctx context.Context, email string) (bool,
 	err := r.db.WithContext(ctx).Model(&model.User{}).Where("email = ?", email).Count(&count).Error
 	return count > 0, err
 }
+
+// ExistsByPhone 检查手机号是否已存在
+func (r *UserRepository) ExistsByPhone(ctx context.Context, phone string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.User{}).Where("phone = ?", phone).Count(&count).Error
+	return count > 0, err
+}
+
+// GetByIdentifier 根据 标识符(用户名/邮箱/手机号) 获取用户
+func (r *UserRepository) GetByIdentifier(ctx context.Context, identifier string) (*model.User, error) {
+	var user model.User
+	err := r.db.WithContext(ctx).Where("username = ? OR email = ? OR phone = ?", identifier, identifier, identifier).First(&user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
+}

@@ -20,7 +20,7 @@ type Response struct {
 
 // 业务状态码定义
 const (
-	CodeSuccess          = 0    // 成功
+	CodeSuccess          = 200  // 成功
 	CodeBadRequest       = 1000 // 请求参数错误
 	CodeUnauthorized     = 1001 // 未授权
 	CodeForbidden        = 1002 // 禁止访问

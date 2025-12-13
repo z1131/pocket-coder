@@ -1,0 +1,5 @@
+{
+  "name": "CloudTerm AI",
+  "description": "A mobile-first remote terminal interface with AI command assistance.",
+  "requestFramePermissions": []
+}

@@ -4,12 +4,11 @@ package websocket
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"log"
 	"sync"
 
 	"pocket-coder-server/internal/cache"
-	"pocket-coder-server/internal/model"
+	_ "pocket-coder-server/internal/model" // 显式引用，解决 "imported and not used" 错误
 	"pocket-coder-server/internal/service"
 )
 
@@ -90,6 +89,18 @@ func (h *Hub) registerClient(client *Client) {
 		log.Printf("Mobile client registered: userID=%d", client.userID)
 
 	case ClientTypeDesktop:
+		// 检查 ProcessID
+		if client.processID != "" {
+			oldPID, _ := h.cache.GetDesktopProcessID(context.Background(), client.desktopID)
+			if oldPID != "" && oldPID != client.processID {
+				// 进程 ID 变更，清理所有活跃会话
+				log.Printf("Process ID changed from %s to %s, resetting sessions...", oldPID, client.processID)
+				if err := h.sessionService.ResetSessions(context.Background(), client.desktopID); err != nil {
+					log.Printf("Failed to reset sessions: %v", err)
+				}
+			}
+		}
+
 		// 检查是否已有连接（替换旧连接）
 		if old, exists := h.desktopClients[client.desktopID]; exists {
 			old.Close()
@@ -104,7 +115,7 @@ func (h *Hub) registerClient(client *Client) {
 		// 更新 Redis 在线状态
 		go func() {
 			ctx := context.Background()
-			if err := h.desktopService.SetDesktopOnline(ctx, client.desktopID, client.userID); err != nil {
+			if err := h.desktopService.SetDesktopOnline(ctx, client.desktopID, client.userID, client.processID); err != nil {
 				log.Printf("Failed to set desktop online: %v", err)
 			}
 
@@ -127,6 +138,7 @@ func (h *Hub) registerClient(client *Client) {
 			// Agent 端逻辑：如果接收到此消息且本地没有任何关联的会话，将其绑定到默认 PTY
 			client.SendMessage(NewMessage(TypeSessionCreate, &SessionCreatePayload{
 				SessionID: session.ID,
+				IsDefault: session.IsDefault,
 			}))
 		}()
 
@@ -319,17 +331,9 @@ func (h *Hub) handleUserMessage(client *Client, msg *Message) {
 			}
 			sessionID = newSession.ID
 
-			// 通知电脑端创建会话
-			h.notifyDesktopClient(desktopID, NewMessage(TypeSessionCreate, &SessionCreatePayload{
-				SessionID: sessionID,
-			}))
+			// 注意：Service 层已经通过 notifier 发送了 TypeSessionCreate 消息，这里不需要再手动发送
+			// 否则会导致 CLI 端收到两次创建指令
 		}
-	}
-
-	// 保存用户消息到数据库
-	_, err = h.sessionService.AddMessage(ctx, sessionID, model.MessageRoleUser, content)
-	if err != nil {
-		log.Printf("Failed to save user message: %v", err)
 	}
 
 	// 转发消息给电脑端
@@ -342,23 +346,7 @@ func (h *Hub) handleUserMessage(client *Client, msg *Message) {
 
 // handleAgentResponse 处理 AI 完整响应（电脑端 → 手机端）
 func (h *Hub) handleAgentResponse(client *Client, msg *Message) {
-	// 解析 Payload
-	payloadBytes, _ := json.Marshal(msg.Payload)
-	var payload AgentResponsePayload
-	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-		log.Printf("Invalid agent response payload: %v", err)
-		return
-	}
-
-	ctx := context.Background()
-
-	// 保存 AI 响应到数据库
-	_, err := h.sessionService.AddMessage(ctx, payload.SessionID, model.MessageRoleAssistant, payload.Content)
-	if err != nil {
-		log.Printf("Failed to save agent response: %v", err)
-	}
-
-	// 转发给用户的手机端
+	// 直接转发给用户的手机端
 	h.notifyMobileClients(client.userID, msg)
 }
 
@@ -422,14 +410,20 @@ func (h *Hub) handleTerminalToMobile(client *Client, msg *Message) {
 	// 如果是终端输出，存储到 Redis
 	if msg.Type == TypeTerminalOutput {
 		if payload, ok := msg.Payload.(map[string]interface{}); ok {
-			if data, ok := payload["data"].(string); ok && data != "" {
+			var sessionID int64
+			if sid, ok := payload["session_id"].(float64); ok {
+				sessionID = int64(sid)
+			}
+
+			if data, ok := payload["data"].(string); ok && data != "" && sessionID > 0 {
 				// 先解码 base64，存储原始数据
 				decoded, err := base64.StdEncoding.DecodeString(data)
 				if err != nil {
 					log.Printf("Failed to decode terminal output: %v", err)
 				} else {
 					ctx := context.Background()
-					if err := h.cache.AppendTerminalHistory(ctx, client.desktopID, decoded); err != nil {
+					// 使用 sessionID 存储历史记录
+					if err := h.cache.AppendTerminalHistory(ctx, sessionID, decoded); err != nil {
 						log.Printf("Failed to append terminal history: %v", err)
 					}
 				}
@@ -443,50 +437,57 @@ func (h *Hub) handleTerminalToMobile(client *Client, msg *Message) {
 
 // handleTerminalHistoryRequest 处理终端历史请求（手机端请求）
 func (h *Hub) handleTerminalHistoryRequest(client *Client, msg *Message) {
-	// 从 payload 获取目标设备 ID
+	// 从 payload 获取目标 session ID
 	payload, ok := msg.Payload.(map[string]interface{})
 	if !ok {
 		log.Printf("Invalid terminal history request payload")
 		return
 	}
 
-	desktopID, ok := payload["desktop_id"].(float64)
-	if !ok || desktopID == 0 {
-		log.Printf("Missing desktop_id in terminal history request")
+	// 优先使用 session_id，兼容旧的 desktop_id (虽然逻辑上不再支持按 desktop 取)
+	var sessionID int64
+	if sid, ok := payload["session_id"].(float64); ok {
+		sessionID = int64(sid)
+	}
+
+	if sessionID == 0 {
+		log.Printf("Missing session_id in terminal history request")
 		return
 	}
 
-	// 检查设备所有权
+	// 检查会话权限 (简单起见，这里假设用户已登录且会话属于该用户可访问的设备)
+	// 严格来说应该查 Session -> Desktop -> UserID
 	ctx := context.Background()
-	desktop, err := h.desktopService.GetDesktopByID(ctx, int64(desktopID))
+	session, err := h.sessionService.GetSessionByID(ctx, sessionID)
+	if err != nil || session == nil {
+		client.SendMessage(NewMessage(TypeError, &ErrorPayload{Code: 404, Message: "会话不存在"}))
+		return
+	}
+	
+	// 检查设备归属
+	desktop, err := h.desktopService.GetDesktopByID(ctx, session.DesktopID)
 	if err != nil || desktop == nil || desktop.UserID != client.userID {
-		client.SendMessage(NewMessage(TypeError, &ErrorPayload{
-			Code:    1003,
-			Message: "无权操作此设备",
-		}))
+		client.SendMessage(NewMessage(TypeError, &ErrorPayload{Code: 403, Message: "无权访问"}))
 		return
 	}
 
 	// 从 Redis 获取历史记录
-	history, err := h.cache.GetTerminalHistory(ctx, int64(desktopID))
+	history, err := h.cache.GetTerminalHistory(ctx, sessionID)
 	if err != nil {
 		log.Printf("Failed to get terminal history: %v", err)
 		return
 	}
 
 	if len(history) == 0 {
-		log.Printf("No terminal history for desktop %d", int64(desktopID))
 		return
 	}
-
-	log.Printf("Sending terminal history for desktop %d, length: %d", int64(desktopID), len(history))
 
 	// 将原始数据编码为 base64 后返回
 	encoded := base64.StdEncoding.EncodeToString(history)
 
 	// 直接返回给请求的手机端
 	client.SendMessage(NewMessage(TypeTerminalHistory, map[string]interface{}{
-		"desktop_id": int64(desktopID),
+		"session_id": sessionID,
 		"data":       encoded,
 	}))
 }
@@ -507,9 +508,17 @@ func (h *Hub) GetOnlineDesktops(userID int64) []int64 {
 }
 
 // NotifySessionCreate 实现 SessionNotifier 接口
-func (h *Hub) NotifySessionCreate(desktopID int64, sessionID int64, workingDir string) {
+func (h *Hub) NotifySessionCreate(desktopID int64, sessionID int64, workingDir string, isDefault bool) {
 	h.notifyDesktopClient(desktopID, NewMessage(TypeSessionCreate, &SessionCreatePayload{
 		SessionID:  sessionID,
 		WorkingDir: workingDir,
+		IsDefault:  isDefault,
+	}))
+}
+
+// NotifySessionClose 实现 SessionNotifier 接口
+func (h *Hub) NotifySessionClose(desktopID int64, sessionID int64) {
+	h.notifyDesktopClient(desktopID, NewMessage(TypeSessionClose, &SessionClosePayload{
+		SessionID: sessionID,
 	}))
 }

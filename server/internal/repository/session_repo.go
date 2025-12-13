@@ -176,6 +176,28 @@ func (r *SessionRepository) GetActiveByDesktopID(ctx context.Context, desktopID 
 	return &session, nil
 }
 
+// GetActiveDefaultSessionByDesktopID 获取设备当前活跃的默认会话
+// 参数:
+//   - ctx: 上下文
+//   - desktopID: 设备ID
+//
+// 返回:
+//   - *model.Session: 活跃默认会话，如果没有返回 nil
+//   - error: 数据库错误
+func (r *SessionRepository) GetActiveDefaultSessionByDesktopID(ctx context.Context, desktopID int64) (*model.Session, error) {
+	var session model.Session
+	err := r.db.WithContext(ctx).
+		Where("desktop_id = ? AND status = ? AND is_default = ?", desktopID, model.SessionStatusActive, true).
+		First(&session).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &session, nil
+}
+
 // Update 更新会话信息
 // 参数:
 //   - ctx: 上下文
@@ -251,21 +273,10 @@ func (r *SessionRepository) CountByDesktopID(ctx context.Context, desktopID int6
 	return count, err
 }
 
-// UpdateSummary 更新会话的标题和摘要
-// 参数:
-//   - ctx: 上下文
-//   - id: 会话ID
-//   - title: 标题
-//   - summary: 摘要
-//
-// 返回:
-//   - error: 数据库错误
-func (r *SessionRepository) UpdateSummary(ctx context.Context, id int64, title, summary string) error {
+// UpdateLogDump 更新会话的日志归档
+func (r *SessionRepository) UpdateLogDump(ctx context.Context, id int64, logContent string) error {
 	return r.db.WithContext(ctx).
 		Model(&model.Session{}).
 		Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"title":   title,
-			"summary": summary,
-		}).Error
+		Update("log_dump", logContent).Error
 }

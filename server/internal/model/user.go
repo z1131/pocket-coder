@@ -25,6 +25,9 @@ type User struct {
 	// 使用指针类型表示可以为 NULL
 	Email *string `gorm:"size:100;uniqueIndex" json:"email,omitempty"`
 
+	// Phone 用户手机号，可选，支持登录
+	Phone *string `gorm:"size:20;uniqueIndex" json:"phone,omitempty"`
+
 	// Avatar 用户头像 URL，可选
 	Avatar *string `gorm:"size:500" json:"avatar,omitempty"`
 

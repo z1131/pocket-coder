@@ -3,11 +3,12 @@ package cmd
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -18,7 +19,6 @@ import (
 	"pocket-coder-cli/internal/api"
 	"pocket-coder-cli/internal/config"
 	"pocket-coder-cli/internal/session"
-	"pocket-coder-cli/internal/terminal"
 	"pocket-coder-cli/internal/websocket"
 )
 
@@ -145,8 +145,6 @@ func doInteractiveLogin() {
 	// 注册/绑定桌面
 	hostname := getHostname()
 	osInfo := fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH)
-	workingDir, _ := os.Getwd()
-	agentType := "claude-code"
 
 	// 获取或生成设备 UUID
 	deviceUUID, err := config.GetDeviceUUID()
@@ -159,8 +157,6 @@ func doInteractiveLogin() {
 	regReq := &api.RegisterDesktopRequest{
 		Name:       hostname,
 		DeviceUUID: deviceUUID,
-		AgentType:  &agentType,
-		WorkingDir: &workingDir,
 		OSInfo:     &osInfo,
 	}
 
@@ -181,7 +177,6 @@ func doInteractiveLogin() {
 	fmt.Println("─────────────────────────────────")
 	fmt.Printf("  👤 账号: %s\n", username)
 	fmt.Printf("  🖥️  设备: %s (ID: %d)\n", regResp.Name, regResp.DesktopID)
-	fmt.Printf("  📁 工作目录: %s\n", filepath.Clean(workingDir))
 	fmt.Println()
 }
 
@@ -196,24 +191,16 @@ func startWebSocket() {
 
 	workDir, _ := os.Getwd()
 
-	fmt.Println("🌐 正在连接服务器...")
-	fmt.Println("─────────────────────────────────")
-	fmt.Printf("  📡 服务器: %s\n", config.GetServerURL())
-	fmt.Printf("  🔑 设备 ID: %s\n", desktopID)
-	fmt.Printf("  📁 工作目录: %s\n", workDir)
-	fmt.Println()
-
-	// 创建默认 PTY 终端
-	ptyTerm := terminal.NewTerminal()
-	
-	// 启用本地显示
-	ptyTerm.SetLocalDisplay(true)
+	// 生成 Process ID (随机 UUID 风格)
+	b := make([]byte, 16)
+	rand.Read(b)
+	processID := hex.EncodeToString(b)
 
 	// 创建 WebSocket 客户端
-	wsClient := websocket.NewClient(config.GetServerURL(), desktopToken, desktopID)
+	wsClient := websocket.NewClient(config.GetServerURL(), desktopToken, desktopID, processID)
 
 	// 创建会话管理器
-	sessMgr := session.NewManager(wsClient, ptyTerm, workDir)
+	sessMgr := session.NewManager(wsClient, workDir)
 
 	// 设置消息处理
 	setupHandlers(wsClient, sessMgr)
@@ -224,36 +211,14 @@ func startWebSocket() {
 		os.Exit(1)
 	}
 
-	// 启动默认终端
-	if err := ptyTerm.Start(workDir); err != nil {
-		fmt.Fprintf(os.Stderr, "✗ 启动终端失败: %v\n", err)
-		wsClient.Disconnect()
-		os.Exit(1)
-	}
-
-	fmt.Println("✅ 已连接到服务器！")
-	fmt.Println("✅ 终端已启动！")
-	fmt.Println()
-	fmt.Println("📱 手机端和电脑端可以同时操作此终端")
-	fmt.Println("   (按 Ctrl+\\ 退出)")
-	fmt.Println()
-	fmt.Println("─────────────────────────────────")
-	fmt.Println()
-
-	// 将当前终端设为 raw mode，以便捕获所有按键
+	// 将当前终端设为 raw mode
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ 设置终端 raw mode 失败: %v\n", err)
-		ptyTerm.Stop()
 		wsClient.Disconnect()
 		os.Exit(1)
 	}
 	defer term.Restore(int(os.Stdin.Fd()), oldState)
-
-	// 设置终端大小为当前窗口大小
-	if width, height, err := term.GetSize(int(os.Stdin.Fd())); err == nil {
-		ptyTerm.Resize(uint16(height), uint16(width))
-	}
 
 	// 用于控制退出的 channel
 	done := make(chan struct{})
@@ -274,19 +239,29 @@ func startWebSocket() {
 			}
 
 			if n > 0 {
-				// 检查是否按下 Ctrl+\ (0x1c) 退出
+				var dataToSend []byte
+				
 				for i := 0; i < n; i++ {
-					if buf[i] == 0x1c {
+					b := buf[i]
+					if b == 0x1c { // Ctrl+\ (ASCII 28) -> 退出
 						close(done)
 						return
+					} else {
+						dataToSend = append(dataToSend, b)
 					}
 				}
 
-				// 写入 PTY (这里总是写入默认终端，因为本地键盘只能控制主终端)
-				ptyTerm.Write(buf[:n])
+				if len(dataToSend) > 0 {
+					sessMgr.WriteToMain(dataToSend)
+				}
 			}
 		}
 	}()
+
+	// 监听窗口大小变化
+	if width, height, err := term.GetSize(int(os.Stdin.Fd())); err == nil {
+		sessMgr.Resize(0, uint16(height), uint16(width))
+	}
 
 	// 等待退出信号
 	sigChan := make(chan os.Signal, 1)
@@ -297,13 +272,14 @@ func startWebSocket() {
 	case <-done:
 	}
 
-	// 恢复终端状态（defer 会处理）
-	fmt.Println()
+	// 恢复终端状态
+	term.Restore(int(os.Stdin.Fd()), oldState)
+	
+	// 关闭所有会话
+	sessMgr.Close()
+	
 	fmt.Println()
 	fmt.Println("正在断开连接...")
-
-	// 停止终端
-	ptyTerm.Stop()
 
 	// 断开 WebSocket
 	wsClient.Disconnect()
@@ -323,9 +299,23 @@ func setupHandlers(wsClient *websocket.Client, sessMgr *session.Manager) {
 					sessionID = int64(sid)
 				}
 				workingDir, _ := payload["working_dir"].(string)
-				
+				isDefault, _ := payload["is_default"].(bool) // 字段名变更
+
 				if sessionID > 0 {
-					sessMgr.HandleSessionCreate(sessionID, workingDir)
+					sessMgr.HandleSessionCreate(sessionID, workingDir, isDefault)
+				}
+			}
+
+		case websocket.TypeSessionClose:
+			// 关闭会话
+			if payload, ok := msg.Payload.(map[string]interface{}); ok {
+				var sessionID int64
+				if sid, ok := payload["session_id"].(float64); ok {
+					sessionID = int64(sid)
+				}
+
+				if sessionID > 0 {
+					sessMgr.HandleSessionClose(sessionID)
 				}
 			}
 
@@ -364,8 +354,9 @@ func setupHandlers(wsClient *websocket.Client, sessMgr *session.Manager) {
 				if sid, ok := payload["session_id"].(float64); ok {
 					sessionID = int64(sid)
 				}
-				rows, _ := payload["rows"].(float64)
-				cols, _ := payload["cols"].(float64)
+			
+rows, _ := payload["rows"].(float64)
+cols, _ := payload["cols"].(float64)
 
 				if rows > 0 && cols > 0 {
 					sessMgr.Resize(sessionID, uint16(rows), uint16(cols))

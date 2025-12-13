@@ -15,7 +15,6 @@ const (
 const (
 	DesktopStatusOnline  = "online"  // 在线
 	DesktopStatusOffline = "offline" // 离线
-	DesktopStatusBusy    = "busy"    // 忙碌（正在执行任务）
 )
 
 // Desktop 电脑设备模型
@@ -47,13 +46,9 @@ type Desktop struct {
 	// cloud: 云端托管的开发环境（预留）
 	Type string `gorm:"size:20;default:local" json:"type"`
 
-	// AgentType 使用的 AI 工具类型
-	// 例如: "claude-code", "aider", "goose"
-	AgentType string `gorm:"size:50;default:claude-code" json:"agent_type"`
-
-	// WorkingDir 当前工作目录
-	// 电脑端报告的当前项目路径
-	WorkingDir *string `gorm:"size:500" json:"working_dir,omitempty"`
+	// IP 设备 IP 地址
+	// 仅作为信息展示，不做连接用途
+	IP *string `gorm:"size:50" json:"ip,omitempty"`
 
 	// OSInfo 操作系统信息
 	// 例如: "macOS 14.0", "Windows 11", "Ubuntu 22.04"
@@ -62,7 +57,6 @@ type Desktop struct {
 	// Status 设备状态
 	// online: 在线
 	// offline: 离线
-	// busy: 正在执行任务
 	// 注意: 实时状态从 Redis 获取，此字段用于持久化
 	Status string `gorm:"size:20;default:offline;index" json:"status"`
 

@@ -173,47 +173,6 @@ func (h *DesktopHandler) DeleteDesktop(c *gin.Context) {
 	response.NoContent(c)
 }
 
-// GetDesktopStatus 获取设备在线状态
-// @Summary 获取设备在线状态
-// @Description 获取指定设备的实时在线状态
-// @Tags 设备
-// @Security Bearer
-// @Produce json
-// @Param id path int true "设备ID"
-// @Success 200 {object} response.Response{data=object}
-// @Router /api/desktops/{id}/status [get]
-func (h *DesktopHandler) GetDesktopStatus(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		response.Unauthorized(c, "请先登录")
-		return
-	}
-
-	desktopID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "无效的设备ID")
-		return
-	}
-
-	desktop, err := h.desktopService.GetDesktop(c.Request.Context(), userID.(int64), desktopID)
-	if err != nil {
-		switch err {
-		case service.ErrDesktopNotFound:
-			response.DeviceNotFound(c)
-		case service.ErrNoPermission:
-			response.Forbidden(c, "无权访问此设备")
-		default:
-			response.InternalError(c, "获取设备状态失败")
-		}
-		return
-	}
-
-	response.Success(c, gin.H{
-		"desktop_id": desktop.ID,
-		"status":     desktop.Status,
-	})
-}
-
 // RegisterDesktop 注册并绑定一台桌面设备
 // @Summary 注册桌面设备（账号直连）
 // @Description 登录后直接在电脑端注册设备，返回 desktop_id 与桌面 token
@@ -254,8 +213,6 @@ func (h *DesktopHandler) RegisterDesktop(c *gin.Context) {
 		"desktop_id":    result.Desktop.ID,
 		"desktop_token": desktopToken,
 		"name":          result.Desktop.Name,
-		"agent_type":    result.Desktop.AgentType,
 		"os_info":       result.Desktop.OSInfo,
-		"working_dir":   result.Desktop.WorkingDir,
 	})
 }

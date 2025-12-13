@@ -183,7 +183,7 @@ func (h *SessionHandler) CreateSession(c *gin.Context) {
 
 // GetSession 获取会话详情
 // @Summary 获取会话详情
-// @Description 获取指定会话的详细信息（包含消息历史）
+// @Description 获取指定会话的详细信息
 // @Tags 会话
 // @Security Bearer
 // @Produce json
@@ -221,7 +221,7 @@ func (h *SessionHandler) GetSession(c *gin.Context) {
 
 // DeleteSession 删除会话
 // @Summary 删除会话
-// @Description 删除指定的会话（会同时删除所有消息）
+// @Description 删除指定的会话
 // @Tags 会话
 // @Security Bearer
 // @Produce json
@@ -301,45 +301,5 @@ func (h *SessionHandler) GetActiveSession(c *gin.Context) {
 
 	response.Success(c, gin.H{
 		"session": session,
-	})
-}
-
-// GetMessages 获取会话消息列表
-// @Summary 获取会话消息列表
-// @Description 获取指定会话的所有消息
-// @Tags 会话
-// @Security Bearer
-// @Produce json
-// @Param id path int true "会话ID"
-// @Success 200 {object} response.Response{data=[]service.MessageResponse}
-// @Router /api/sessions/{id}/messages [get]
-func (h *SessionHandler) GetMessages(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		response.Unauthorized(c, "请先登录")
-		return
-	}
-
-	sessionID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "无效的会话ID")
-		return
-	}
-
-	messages, err := h.sessionService.GetMessages(c.Request.Context(), userID.(int64), sessionID)
-	if err != nil {
-		switch err {
-		case service.ErrSessionNotFound:
-			response.SessionNotFound(c)
-		case service.ErrNoPermission:
-			response.Forbidden(c, "无权访问此会话")
-		default:
-			response.InternalError(c, "获取消息列表失败")
-		}
-		return
-	}
-
-	response.Success(c, gin.H{
-		"messages": messages,
 	})
 }

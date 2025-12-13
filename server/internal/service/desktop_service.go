@@ -44,9 +44,8 @@ type DesktopResponse struct {
 	ID            int64   `json:"id"`
 	Name          string  `json:"name"`
 	Type          string  `json:"type"`
-	AgentType     string  `json:"agent_type"`
-	Status        string  `json:"status"`          // 实时状态（从 Redis 获取）
-	WorkingDir    *string `json:"working_dir,omitempty"`
+	IP            *string `json:"ip,omitempty"`
+	Status        string  `json:"status"` // 实时状态（从 Redis 获取）
 	OSInfo        *string `json:"os_info,omitempty"`
 	LastHeartbeat *string `json:"last_heartbeat,omitempty"`
 }
@@ -55,8 +54,7 @@ type DesktopResponse struct {
 type RegisterDesktopRequest struct {
 	Name       string  `json:"name" binding:"required"`
 	DeviceUUID string  `json:"device_uuid" binding:"required"` // 客户端持久化的设备 UUID
-	AgentType  *string `json:"agent_type,omitempty"`
-	WorkingDir *string `json:"working_dir,omitempty"`
+	IP         *string `json:"ip,omitempty"`                   // 设备 IP
 	OSInfo     *string `json:"os_info,omitempty"`
 }
 
@@ -105,13 +103,12 @@ func (s *DesktopService) ListDesktops(ctx context.Context, userID int64) ([]Desk
 		}
 
 		result[i] = DesktopResponse{
-			ID:         desktop.ID,
-			Name:       desktop.Name,
-			Type:       desktop.Type,
-			AgentType:  desktop.AgentType,
-			Status:     status,
-			WorkingDir: desktop.WorkingDir,
-			OSInfo:     desktop.OSInfo,
+			ID:     desktop.ID,
+			Name:   desktop.Name,
+			Type:   desktop.Type,
+			IP:     desktop.IP,
+			Status: status,
+			OSInfo: desktop.OSInfo,
 		}
 
 		// 格式化最后心跳时间
@@ -136,11 +133,6 @@ func (s *DesktopService) RegisterDesktop(ctx context.Context, userID int64, req 
 		return nil, errors.New("设备标识不能为空")
 	}
 
-	agentType := "claude-code"
-	if req.AgentType != nil && *req.AgentType != "" {
-		agentType = *req.AgentType
-	}
-
 	// 按 device_uuid 查找设备（比 name 更可靠，即使改主机名也能识别同一设备）
 	existing, err := s.desktopRepo.GetByUserIDAndDeviceUUID(ctx, userID, req.DeviceUUID)
 	if err != nil {
@@ -154,8 +146,7 @@ func (s *DesktopService) RegisterDesktop(ctx context.Context, userID int64, req 
 		// 设备已存在，更新信息（包括可能变更的主机名）
 		deviceToken = existing.DeviceToken
 		existing.Name = req.Name // 更新主机名（可能已变更）
-		existing.AgentType = agentType
-		existing.WorkingDir = req.WorkingDir
+		existing.IP = req.IP
 		existing.OSInfo = req.OSInfo
 
 		if err := s.desktopRepo.Update(ctx, existing); err != nil {
@@ -171,8 +162,7 @@ func (s *DesktopService) RegisterDesktop(ctx context.Context, userID int64, req 
 			DeviceUUID:  req.DeviceUUID,
 			DeviceToken: deviceToken,
 			Type:        model.DesktopTypeLocal,
-			AgentType:   agentType,
-			WorkingDir:  req.WorkingDir,
+			IP:          req.IP,
 			OSInfo:      req.OSInfo,
 			Status:      model.DesktopStatusOffline,
 		}
@@ -183,13 +173,12 @@ func (s *DesktopService) RegisterDesktop(ctx context.Context, userID int64, req 
 	}
 
 	resp := &DesktopResponse{
-		ID:         desktop.ID,
-		Name:       desktop.Name,
-		Type:       desktop.Type,
-		AgentType:  desktop.AgentType,
-		Status:     model.DesktopStatusOffline,
-		OSInfo:     desktop.OSInfo,
-		WorkingDir: desktop.WorkingDir,
+		ID:     desktop.ID,
+		Name:   desktop.Name,
+		Type:   desktop.Type,
+		IP:     desktop.IP,
+		Status: model.DesktopStatusOffline,
+		OSInfo: desktop.OSInfo,
 	}
 
 	return &RegisterDesktopResult{
@@ -230,13 +219,12 @@ func (s *DesktopService) GetDesktop(ctx context.Context, userID, desktopID int64
 	}
 
 	result := &DesktopResponse{
-		ID:         desktop.ID,
-		Name:       desktop.Name,
-		Type:       desktop.Type,
-		AgentType:  desktop.AgentType,
-		Status:     status,
-		WorkingDir: desktop.WorkingDir,
-		OSInfo:     desktop.OSInfo,
+		ID:     desktop.ID,
+		Name:   desktop.Name,
+		Type:   desktop.Type,
+		IP:     desktop.IP,
+		Status: status,
+		OSInfo: desktop.OSInfo,
 	}
 
 	if desktop.LastHeartbeat != nil {
@@ -267,9 +255,7 @@ func (s *DesktopService) ValidateDesktopOwnership(ctx context.Context, desktopID
 
 // UpdateDesktopRequest 更新设备请求
 type UpdateDesktopRequest struct {
-	Name       *string `json:"name"`        // 设备名称
-	AgentType  *string `json:"agent_type"`  // AI 工具类型
-	WorkingDir *string `json:"working_dir"` // 工作目录
+	Name *string `json:"name"` // 设备名称
 }
 
 // UpdateDesktop 更新设备信息
@@ -301,12 +287,6 @@ func (s *DesktopService) UpdateDesktop(ctx context.Context, userID, desktopID in
 	fields := make(map[string]interface{})
 	if req.Name != nil {
 		fields["name"] = *req.Name
-	}
-	if req.AgentType != nil {
-		fields["agent_type"] = *req.AgentType
-	}
-	if req.WorkingDir != nil {
-		fields["working_dir"] = *req.WorkingDir
 	}
 
 	// 4. 如果没有要更新的字段，直接返回当前设备信息
@@ -361,12 +341,13 @@ func (s *DesktopService) DeleteDesktop(ctx context.Context, userID, desktopID in
 //   - ctx: 上下文
 //   - desktopID: 设备ID
 //   - userID: 用户ID
+//   - processID: 进程ID（用于区分重启）
 //
 // 返回:
 //   - error: 操作错误
-func (s *DesktopService) SetDesktopOnline(ctx context.Context, desktopID, userID int64) error {
+func (s *DesktopService) SetDesktopOnline(ctx context.Context, desktopID, userID int64, processID string) error {
 	// 1. 更新 Redis 在线状态
-	if err := s.cache.SetDesktopOnline(ctx, desktopID, userID); err != nil {
+	if err := s.cache.SetDesktopOnline(ctx, desktopID, userID, processID); err != nil {
 		return err
 	}
 

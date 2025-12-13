@@ -24,7 +24,7 @@ const (
 	// 服务端 → 电脑端
 	TypeUserMessage    = "user:message"    // 用户发送的消息
 	TypeSessionCreate  = "session:create"  // 创建新会话
-	TypeSessionEnd     = "session:end"     // 结束会话
+	TypeSessionClose   = "session:close"   // 关闭会话
 
 	// 服务端 → 手机端
 	TypeDesktopOnline  = "desktop:online"  // 电脑上线
@@ -107,6 +107,13 @@ type DesktopStatusPayload struct {
 type SessionCreatePayload struct {
 	SessionID  int64  `json:"session_id"`            // 会话ID
 	WorkingDir string `json:"working_dir,omitempty"` // 工作目录
+	IsDefault  bool   `json:"is_default,omitempty"`  // 是否为默认会话（需要本地显示）
+}
+
+// SessionClosePayload 关闭会话 Payload
+// 通知电脑端关闭会话时使用
+type SessionClosePayload struct {
+	SessionID int64 `json:"session_id"` // 会话ID
 }
 
 // ErrorPayload 错误消息 Payload

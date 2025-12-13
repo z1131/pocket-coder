@@ -43,10 +43,10 @@ type LoginResponse struct {
 }
 
 // Login 使用用户名密码登录
-func (c *Client) Login(username, password string) (*LoginResponse, error) {
+func (c *Client) Login(identifier, password string) (*LoginResponse, error) {
     body := map[string]string{
-        "username": username,
-        "password": password,
+        "identifier": identifier,
+        "password":   password,
     }
     resp, err := c.post("/api/v1/auth/login", body, "")
     if err != nil {
@@ -63,8 +63,7 @@ func (c *Client) Login(username, password string) (*LoginResponse, error) {
 type RegisterDesktopRequest struct {
     Name       string  `json:"name"`
     DeviceUUID string  `json:"device_uuid"`            // 设备唯一标识（持久化的 UUID）
-    AgentType  *string `json:"agent_type,omitempty"`
-    WorkingDir *string `json:"working_dir,omitempty"`
+    IP         *string `json:"ip,omitempty"`           // 设备 IP
     OSInfo     *string `json:"os_info,omitempty"`
 }
 
@@ -72,9 +71,7 @@ type RegisterDesktopResponse struct {
     DesktopID    int64   `json:"desktop_id"`
     DesktopToken string  `json:"desktop_token"`
     Name         string  `json:"name"`
-    AgentType    string  `json:"agent_type"`
     OSInfo       *string `json:"os_info"`
-    WorkingDir   *string `json:"working_dir"`
 }
 
 // RegisterDesktop 登录后注册桌面，返回 desktop_id 与桌面专用 token
@@ -140,7 +137,7 @@ func (c *Client) do(req *http.Request) (*APIResponse, error) {
         return nil, fmt.Errorf("解析响应失败: %w", err)
     }
 
-    if apiResp.Code != 0 {
+    if apiResp.Code != 200 {
         return nil, fmt.Errorf("API 错误: %s", apiResp.Message)
     }
 

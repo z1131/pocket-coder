@@ -63,20 +63,12 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	desktopRepo := repository.NewDesktopRepository(db)
 	sessionRepo := repository.NewSessionRepository(db)
-	messageRepo := repository.NewMessageRepository(db)
 
 	// 初始化 Service 层
 	authService := service.NewAuthService(userRepo, desktopRepo, redisCache, jwtService)
 	userService := service.NewUserService(userRepo)
 	desktopService := service.NewDesktopService(desktopRepo, sessionRepo, redisCache)
-	sessionService := service.NewSessionService(sessionRepo, messageRepo, desktopRepo, redisCache)
-
-	// 初始化 AI 服务（如果配置了 API Key）
-	if cfg.AI.QwenAPIKey != "" {
-		aiService := service.NewAIService(cfg.AI.QwenAPIKey)
-		sessionService.SetAIService(aiService)
-		log.Println("AI service initialized with Qwen API")
-	}
+	sessionService := service.NewSessionService(sessionRepo, desktopRepo, redisCache)
 
 	// 初始化 WebSocket Hub
 	wsHub := websocket.NewHub(desktopService, sessionService, redisCache)
@@ -229,11 +221,8 @@ func registerRoutes(
 	{
 		auth.POST("/register", authHandler.Register)
 		auth.POST("/login", authHandler.Login)
-		auth.POST("/refresh", authHandler.RefreshToken)              // 刷新 Token
-		auth.POST("/logout", authHandler.Logout)                      // 登出
-		auth.POST("/device/code", authHandler.RequestDeviceCode)
-		auth.GET("/device/status", authHandler.GetDeviceStatus)
-		auth.POST("/device/authorize", authHandler.AuthorizeDevice)
+		auth.POST("/refresh", authHandler.RefreshToken) // 刷新 Token
+		auth.POST("/logout", authHandler.Logout)        // 登出
 	}
 
 	// 用户相关（需要登录）
@@ -241,8 +230,6 @@ func registerRoutes(
 	users.Use(middleware.AuthMiddleware(jwtService, redisCache))
 	{
 		users.GET("/me", userHandler.GetProfile)
-		users.PUT("/me", userHandler.UpdateProfile)
-		users.PUT("/me/password", userHandler.ChangePassword)
 	}
 
 	// 设备相关（需要登录）
@@ -254,7 +241,6 @@ func registerRoutes(
 		desktops.GET("/:id", desktopHandler.GetDesktop)
 		desktops.PUT("/:id", desktopHandler.UpdateDesktop)
 		desktops.DELETE("/:id", desktopHandler.DeleteDesktop)
-		desktops.GET("/:id/status", desktopHandler.GetDesktopStatus)
 	}
 
 	// 会话相关（需要登录）
@@ -265,7 +251,6 @@ func registerRoutes(
 		sessions.GET("", sessionHandler.ListSessions)
 		sessions.GET("/:id", sessionHandler.GetSession)
 		sessions.DELETE("/:id", sessionHandler.DeleteSession)
-		sessions.GET("/:id/messages", sessionHandler.GetMessages)
 	}
 
 	// WebSocket 路由

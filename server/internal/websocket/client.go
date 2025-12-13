@@ -26,6 +26,7 @@ type Client struct {
 	clientType ClientType      // 客户端类型
 	userID     int64           // 用户ID
 	desktopID  int64           // 设备ID（仅电脑端有值）
+	processID  string          // 进程ID（仅电脑端有值）
 	mu         sync.Mutex      // 保护写操作的互斥锁
 }
 
@@ -45,7 +46,7 @@ const (
 )
 
 // NewClient 创建新的客户端
-func NewClient(hub *Hub, conn *websocket.Conn, clientType ClientType, userID, desktopID int64) *Client {
+func NewClient(hub *Hub, conn *websocket.Conn, clientType ClientType, userID, desktopID int64, processID string) *Client {
 	return &Client{
 		hub:        hub,
 		conn:       conn,
@@ -53,6 +54,7 @@ func NewClient(hub *Hub, conn *websocket.Conn, clientType ClientType, userID, de
 		clientType: clientType,
 		userID:     userID,
 		desktopID:  desktopID,
+		processID:  processID,
 	}
 }
 
@@ -134,13 +136,6 @@ func (c *Client) WritePump() {
 			// 写入消息
 			w.Write(message)
 
-			// 如果通道中还有消息，一起发送
-			n := len(c.send)
-			for i := 0; i < n; i++ {
-				w.Write([]byte{'\n'})
-				w.Write(<-c.send)
-			}
-
 			if err := w.Close(); err != nil {
 				return
 			}
@@ -183,12 +178,6 @@ func (c *Client) handleMessage(msg *Message) {
 		// 回复 Pong
 		c.SendMessage(NewMessage(TypePong, nil))
 
-	case TypeUserMessage:
-		// 手机端发送消息给电脑端
-		if c.clientType == ClientTypeMobile {
-			c.hub.handleUserMessage(c, msg)
-		}
-
 	case TypeTerminalInput, TypeTerminalResize:
 		// 手机端 → 电脑端：终端输入/调整大小
 		if c.clientType == ClientTypeMobile {
@@ -205,24 +194,6 @@ func (c *Client) handleMessage(msg *Message) {
 		// 手机端请求历史：从 Redis 获取并返回
 		if c.clientType == ClientTypeMobile {
 			c.hub.handleTerminalHistoryRequest(c, msg)
-		}
-
-	case TypeAgentResponse:
-		// 电脑端返回 AI 完整响应
-		if c.clientType == ClientTypeDesktop {
-			c.hub.handleAgentResponse(c, msg)
-		}
-
-	case TypeAgentStream:
-		// 电脑端返回 AI 流式输出
-		if c.clientType == ClientTypeDesktop {
-			c.hub.handleAgentStream(c, msg)
-		}
-
-	case TypeAgentStatus:
-		// 电脑端报告 AI 状态
-		if c.clientType == ClientTypeDesktop {
-			c.hub.handleAgentStatus(c, msg)
 		}
 
 	default:

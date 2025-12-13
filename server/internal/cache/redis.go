@@ -50,159 +50,6 @@ func (c *RedisCache) Close() error {
 	return c.client.Close()
 }
 
-// ==================== 设备授权码相关 ====================
-// 用于实现 Device Flow 登录流程
-// 电脑端获取设备码 -> 用户在手机端输入用户码授权 -> 电脑端轮询获取授权结果
-
-// DeviceCodeInfo 设备授权码信息
-// 存储在 Redis 中，用于设备登录流程
-type DeviceCodeInfo struct {
-	DeviceToken string `json:"device_token"` // 设备唯一标识
-	UserCode    string `json:"user_code"`    // 用户输入的短码，如 "ABCD-1234"
-	Status      string `json:"status"`       // pending: 等待授权, authorized: 已授权
-	UserID      int64  `json:"user_id,omitempty"` // 授权用户ID，授权后填充
-	DeviceName  string `json:"device_name,omitempty"` // 设备名称
-	OSInfo      string `json:"os_info,omitempty"`     // 操作系统信息
-}
-
-// CreateDeviceCode 创建设备授权码
-// 将授权码信息存入 Redis，设置 15 分钟过期
-// 参数:
-//   - ctx: 上下文
-//   - code: 设备码（长码，内部使用）
-//   - info: 授权码信息
-//
-// 返回:
-//   - error: Redis 操作错误
-func (c *RedisCache) CreateDeviceCode(ctx context.Context, code string, info *DeviceCodeInfo) error {
-	// 将结构体序列化为 JSON
-	data, err := json.Marshal(info)
-	if err != nil {
-		return fmt.Errorf("failed to marshal device code info: %w", err)
-	}
-
-	// 使用 Pipeline 一次性执行多个命令
-	// Pipeline 可以减少网络往返次数，提高性能
-	pipe := c.client.Pipeline()
-
-	// 存储设备码信息
-	// Key: device_code:{code}
-	// TTL: 15分钟
-	pipe.Set(ctx, fmt.Sprintf("device_code:%s", code), data, 15*time.Minute)
-
-	// 存储用户码到设备码的映射（反向索引）
-	// 用户输入用户码时，可以快速找到对应的设备码
-	// Key: user_code:{user_code}
-	pipe.Set(ctx, fmt.Sprintf("user_code:%s", info.UserCode), code, 15*time.Minute)
-
-	// 执行 Pipeline 中的所有命令
-	_, err = pipe.Exec(ctx)
-	return err
-}
-
-// GetDeviceCode 获取设备授权码信息
-// 参数:
-//   - ctx: 上下文
-//   - code: 设备码
-//
-// 返回:
-//   - *DeviceCodeInfo: 授权码信息，不存在或已过期返回 nil
-//   - error: Redis 操作错误
-func (c *RedisCache) GetDeviceCode(ctx context.Context, code string) (*DeviceCodeInfo, error) {
-	key := fmt.Sprintf("device_code:%s", code)
-	data, err := c.client.Get(ctx, key).Bytes()
-	if err != nil {
-		// redis.Nil 表示 Key 不存在
-		if err == redis.Nil {
-			return nil, nil // 返回 nil 表示不存在或已过期
-		}
-		return nil, err
-	}
-
-	var info DeviceCodeInfo
-	if err := json.Unmarshal(data, &info); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal device code info: %w", err)
-	}
-	return &info, nil
-}
-
-// GetDeviceCodeByUserCode 通过用户码获取设备码
-// 用户在手机端输入用户码时调用
-// 参数:
-//   - ctx: 上下文
-//   - userCode: 用户码（如 "ABCD-1234"）
-//
-// 返回:
-//   - string: 设备码，不存在返回空字符串
-//   - error: Redis 操作错误
-func (c *RedisCache) GetDeviceCodeByUserCode(ctx context.Context, userCode string) (string, error) {
-	deviceCode, err := c.client.Get(ctx, fmt.Sprintf("user_code:%s", userCode)).Result()
-	if err == redis.Nil {
-		return "", nil
-	}
-	return deviceCode, err
-}
-
-// AuthorizeDeviceCode 授权设备码
-// 用户在手机端确认授权后调用
-// 参数:
-//   - ctx: 上下文
-//   - code: 设备码
-//   - userID: 授权用户ID
-//
-// 返回:
-//   - error: 如果设备码不存在返回错误
-func (c *RedisCache) AuthorizeDeviceCode(ctx context.Context, code string, userID int64) error {
-	// 获取当前设备码信息
-	info, err := c.GetDeviceCode(ctx, code)
-	if err != nil {
-		return err
-	}
-	if info == nil {
-		return fmt.Errorf("device code not found or expired")
-	}
-
-	// 更新状态和用户ID
-	info.Status = "authorized"
-	info.UserID = userID
-
-	// 序列化更新后的信息
-	data, err := json.Marshal(info)
-	if err != nil {
-		return err
-	}
-
-	// 获取原有 TTL，保持原有过期时间
-	key := fmt.Sprintf("device_code:%s", code)
-	ttl, err := c.client.TTL(ctx, key).Result()
-	if err != nil {
-		return err
-	}
-	if ttl <= 0 {
-		ttl = 5 * time.Minute // 如果 TTL 异常，设置默认 5 分钟
-	}
-
-	// 更新 Redis 中的值
-	return c.client.Set(ctx, key, data, ttl).Err()
-}
-
-// DeleteDeviceCode 删除设备授权码
-// 授权完成后调用清理
-// 参数:
-//   - ctx: 上下文
-//   - code: 设备码
-//   - userCode: 用户码
-//
-// 返回:
-//   - error: Redis 操作错误
-func (c *RedisCache) DeleteDeviceCode(ctx context.Context, code, userCode string) error {
-	pipe := c.client.Pipeline()
-	pipe.Del(ctx, fmt.Sprintf("device_code:%s", code))
-	pipe.Del(ctx, fmt.Sprintf("user_code:%s", userCode))
-	_, err := pipe.Exec(ctx)
-	return err
-}
-
 // ==================== 在线状态管理 ====================
 // 使用 Redis Set 存储在线设备列表，支持快速查询
 
@@ -212,10 +59,11 @@ func (c *RedisCache) DeleteDeviceCode(ctx context.Context, code, userCode string
 //   - ctx: 上下文
 //   - desktopID: 设备ID
 //   - userID: 用户ID
+//   - processID: 进程ID（用于区分重启）
 //
 // 返回:
 //   - error: Redis 操作错误
-func (c *RedisCache) SetDesktopOnline(ctx context.Context, desktopID, userID int64) error {
+func (c *RedisCache) SetDesktopOnline(ctx context.Context, desktopID, userID int64, processID string) error {
 	pipe := c.client.Pipeline()
 
 	// 添加到全局在线设备集合
@@ -229,8 +77,20 @@ func (c *RedisCache) SetDesktopOnline(ctx context.Context, desktopID, userID int
 	// 如果 2 分钟内没有更新心跳，Key 会自动删除
 	pipe.Set(ctx, fmt.Sprintf("desktop:%d:heartbeat", desktopID), time.Now().Unix(), 2*time.Minute)
 
+	// 存储 ProcessID
+	pipe.Set(ctx, fmt.Sprintf("desktop:%d:pid", desktopID), processID, 0)
+
 	_, err := pipe.Exec(ctx)
 	return err
+}
+
+// GetDesktopProcessID 获取设备当前的 ProcessID
+func (c *RedisCache) GetDesktopProcessID(ctx context.Context, desktopID int64) (string, error) {
+	pid, err := c.client.Get(ctx, fmt.Sprintf("desktop:%d:pid", desktopID)).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	return pid, err
 }
 
 // SetDesktopOffline 设置设备离线
@@ -497,82 +357,41 @@ func (c *RedisCache) Ping(ctx context.Context) error {
 	return c.client.Ping(ctx).Err()
 }
 
-// ==================== 终端历史记录 ====================
-// 用于存储和获取终端输出历史，支持页面刷新后恢复
-
-const (
-	// 终端历史最大长度（128KB）
-	MaxTerminalHistorySize = 128 * 1024
-	// 终端历史过期时间（24小时）
-	TerminalHistoryTTL = 24 * time.Hour
-)
-
 // AppendTerminalHistory 追加终端历史记录
-// 参数:
-//   - ctx: 上下文
-//   - desktopID: 设备ID
-//   - data: 新的终端输出数据（原始二进制）
-//
-// 返回:
-//   - error: Redis 操作错误
-func (c *RedisCache) AppendTerminalHistory(ctx context.Context, desktopID int64, data []byte) error {
-	key := fmt.Sprintf("terminal:history:%d", desktopID)
-	
-	// 追加数据到现有值
-	_, err := c.client.Append(ctx, key, string(data)).Result()
-	if err != nil {
+func (c *RedisCache) AppendTerminalHistory(ctx context.Context, sessionID int64, data []byte) error {
+	key := fmt.Sprintf("session:history:%d", sessionID)
+	// 使用 Append 命令
+	if err := c.client.Append(ctx, key, string(data)).Err(); err != nil {
 		return err
 	}
-	
-	// 检查长度，如果超过限制则截断
-	length, err := c.client.StrLen(ctx, key).Result()
-	if err != nil {
-		return err
-	}
-	
-	if length > MaxTerminalHistorySize {
-		// 获取当前值，保留后 3/4
-		currentData, err := c.client.Get(ctx, key).Bytes()
-		if err != nil {
-			return err
-		}
-		keepStart := len(currentData) - (MaxTerminalHistorySize * 3 / 4)
-		if keepStart > 0 {
-			c.client.Set(ctx, key, currentData[keepStart:], TerminalHistoryTTL)
-		}
-	}
-	
-	// 更新过期时间
-	c.client.Expire(ctx, key, TerminalHistoryTTL)
-	
-	return nil
+	// 设置过期时间（例如 7 天）
+	return c.client.Expire(ctx, key, 7*24*time.Hour).Err()
 }
 
 // GetTerminalHistory 获取终端历史记录
-// 参数:
-//   - ctx: 上下文
-//   - desktopID: 设备ID
-//
-// 返回:
-//   - []byte: 终端历史数据（原始二进制）
-//   - error: Redis 操作错误
-func (c *RedisCache) GetTerminalHistory(ctx context.Context, desktopID int64) ([]byte, error) {
-	key := fmt.Sprintf("terminal:history:%d", desktopID)
+func (c *RedisCache) GetTerminalHistory(ctx context.Context, sessionID int64) ([]byte, error) {
+	key := fmt.Sprintf("session:history:%d", sessionID)
 	data, err := c.client.Get(ctx, key).Bytes()
 	if err == redis.Nil {
-		return nil, nil // 没有历史记录
+		return nil, nil
 	}
 	return data, err
 }
 
 // ClearTerminalHistory 清除终端历史记录
-// 参数:
-//   - ctx: 上下文
-//   - desktopID: 设备ID
-//
-// 返回:
-//   - error: Redis 操作错误
-func (c *RedisCache) ClearTerminalHistory(ctx context.Context, desktopID int64) error {
-	key := fmt.Sprintf("terminal:history:%d", desktopID)
+func (c *RedisCache) ClearTerminalHistory(ctx context.Context, sessionID int64) error {
+	key := fmt.Sprintf("session:history:%d", sessionID)
 	return c.client.Del(ctx, key).Err()
+}
+
+// GetTerminalHistoryTail 获取终端历史记录的最后一部分（用于预览）
+func (c *RedisCache) GetTerminalHistoryTail(ctx context.Context, sessionID int64, size int64) ([]byte, error) {
+	key := fmt.Sprintf("session:history:%d", sessionID)
+	// GETRANGE key start end
+	// start 为负数表示倒数
+	data, err := c.client.GetRange(ctx, key, -size, -1).Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	return data, err
 }
