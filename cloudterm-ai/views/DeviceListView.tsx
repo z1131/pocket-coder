@@ -8,15 +8,14 @@ import { useAuthStore, useAppStore } from '../store/useStore';
 const DeviceListView: React.FC = () => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
-  const { user, logout } = useAuthStore();
+  const { user, token, logout } = useAuthStore();
   const setCurrentDesktop = useAppStore((state) => state.setCurrentDesktop);
   const navigate = useNavigate();
 
   useEffect(() => {
     // Connect WebSocket globally when in device list to receive updates
-    const token = localStorage.getItem('token');
     if (token) {
-      ws.connect();
+      ws.connect(token);
     }
 
     const loadDevices = async () => {
@@ -51,7 +50,7 @@ const DeviceListView: React.FC = () => {
       // or we can disconnect if we want strict resource management, but for SPA it's usually fine.
       // Ideally App.tsx handles the global connection.
     };
-  }, []);
+  }, [token]);
 
   const handleLogout = () => {
     logout();

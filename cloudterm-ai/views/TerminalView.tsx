@@ -40,6 +40,7 @@ const TerminalView: React.FC = () => {
 
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
+  const [activeModifier, setActiveModifier] = useState<string | null>(null);
   
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
@@ -50,21 +51,30 @@ const TerminalView: React.FC = () => {
   // 1. Load Session & Desktop Info
   useEffect(() => {
     if (!sessionId) return;
+    
+    console.log('[TerminalView] Fetching session details for ID:', sessionId);
+
     api.session.get(Number(sessionId))
       .then(res => {
+        console.log('[TerminalView] Session loaded successfully:', res);
         setSession(res);
         // Fetch desktop info to get name and initial status
         if (res.desktop_id) {
+            console.log('[TerminalView] Fetching desktop info for ID:', res.desktop_id);
             api.desktop.get(res.desktop_id).then(d => {
+                console.log('[TerminalView] Desktop loaded:', d);
                 setDesktopName(d.name);
                 setIsDesktopOnline(d.status === 'online');
-            }).catch(() => {
+            }).catch((err) => {
+              console.error('[TerminalView] Failed to load desktop info:', err);
               setDesktopName('Unknown Host');
               setIsDesktopOnline(false);
             });
         }
       })
-      .catch(console.error);
+      .catch(err => {
+        console.error('[TerminalView] Failed to load session:', err);
+      });
   }, [sessionId]);
 
   // 2. Init Xterm & WebSocket
@@ -187,7 +197,54 @@ const TerminalView: React.FC = () => {
       term.dispose();
       ws.disconnect();
     };
-  }, [token, sessionId, session]); // Re-run if session info (desktop_id) loads
+  }, [token, sessionId, session]);
+
+  // Handle Input Change (for Sticky Keys)
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value;
+    
+    // If a modifier is active and we have input
+    if (activeModifier && newValue.length > 0) {
+      // Get the last character typed (assuming append)
+      const char = newValue.slice(-1);
+      
+      if (activeModifier === 'CTRL') {
+        const code = char.toUpperCase().charCodeAt(0);
+        if (code >= 64 && code <= 95) {
+          // A-Z, [, \, ], ^, _
+          const ctrlChar = String.fromCharCode(code - 64);
+          const encoded = utf8_to_b64(ctrlChar);
+          ws.send('terminal:input', {
+            session_id: Number(sessionId),
+            data: encoded,
+          });
+        } else if (code >= 97 && code <= 122) {
+          // a-z
+          const ctrlChar = String.fromCharCode(code - 96);
+          const encoded = utf8_to_b64(ctrlChar);
+          ws.send('terminal:input', {
+            session_id: Number(sessionId),
+            data: encoded,
+          });
+        }
+      } else if (activeModifier === 'ALT') {
+         // ESC + char
+         const encoded = utf8_to_b64('\x1b' + char);
+         ws.send('terminal:input', {
+            session_id: Number(sessionId),
+            data: encoded,
+         });
+      }
+
+      // Clear input and reset modifier
+      setInputValue('');
+      setActiveModifier(null);
+      // Try to keep focus on input for continuous typing
+      // xtermRef.current?.focus(); 
+    } else {
+      setInputValue(newValue);
+    }
+  };
 
   // Handle Input Bar (Quick Command)
   const handleQuickCommand = (e: React.FormEvent) => {
@@ -208,6 +265,18 @@ const TerminalView: React.FC = () => {
   // Handle Virtual Keys
   const handleVirtualKey = (key: string) => {
     if (!xtermRef.current) return;
+    
+    // Toggle Modifiers
+    if (key === 'CTRL' || key === 'ALT') {
+      setActiveModifier(current => current === key ? null : key);
+      return;
+    }
+
+    // If modifier is active, apply simple reset for now to avoid confusion
+    if (activeModifier) {
+       setActiveModifier(null);
+    }
+
     let sequence = '';
     
     switch (key) {
@@ -276,7 +345,7 @@ const TerminalView: React.FC = () => {
 
       {/* Footer & Controls */}
       <footer className="bg-slate-950 border-t border-slate-800 shrink-0 z-20 pb-[env(safe-area-inset-bottom)]">
-        <VirtualKeyboard onKeyPress={handleVirtualKey} />
+        <VirtualKeyboard onKeyPress={handleVirtualKey} activeModifier={activeModifier} />
 
         <div className="p-2 flex gap-2 items-center bg-slate-900/50 backdrop-blur">
           <button 
@@ -287,13 +356,15 @@ const TerminalView: React.FC = () => {
           </button>
 
           <form onSubmit={handleQuickCommand} className="flex-1 relative flex items-center">
-            <span className="absolute left-3 text-slate-500 font-mono text-lg">$</span>
+            <span className="absolute left-3 text-slate-500 font-mono text-lg select-none">{activeModifier ? `${activeModifier} +` : '$'}</span>
             <input
               type="text"
               value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              className="w-full bg-slate-800 text-white font-mono text-sm rounded-lg pl-8 pr-10 py-2.5 border border-slate-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all placeholder:text-slate-600"
-              placeholder={isConnected ? "Quick command..." : "Disconnected"}
+              onChange={handleInputChange}
+              className={`w-full bg-slate-800 text-white font-mono text-sm rounded-lg pr-10 py-2.5 border border-slate-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all placeholder:text-slate-600 ${
+                activeModifier ? 'pl-24 ring-1 ring-indigo-500 border-indigo-500 bg-indigo-900/20' : 'pl-8'
+              }`}
+              placeholder={isConnected ? (activeModifier ? "Type a key..." : "Quick command...") : "Disconnected"}
               disabled={!isConnected}
               autoComplete="off"
             />
