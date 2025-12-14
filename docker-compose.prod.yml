@@ -16,14 +16,14 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: registry.cn-hangzhou.aliyuncs.com/pocket_coder/frontend:latest
+    image: crpi-16uyo5eg9cykcl2r.cn-hangzhou.personal.cr.aliyuncs.com/pocket_coder/frontend:latest
     container_name: pocket-coder-frontend
     networks:
       - pocket-coder-net
     restart: unless-stopped
 
   server:
-    image: registry.cn-hangzhou.aliyuncs.com/pocket_coder/server:latest
+    image: crpi-16uyo5eg9cykcl2r.cn-hangzhou.personal.cr.aliyuncs.com/pocket_coder/server:latest
     container_name: pocket-coder-server
     env_file:
       - .env
