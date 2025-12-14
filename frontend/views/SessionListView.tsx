@@ -8,6 +8,23 @@ import relativeTime from 'dayjs/plugin/relativeTime';
 
 dayjs.extend(relativeTime);
 
+// Helper: Decode UTF-8 Base64
+function b64_to_utf8(str: string): string {
+  try {
+    const binString = atob(str);
+    const bytes = Uint8Array.from(binString, (m) => m.codePointAt(0) || 0);
+    return new TextDecoder().decode(bytes);
+  } catch (e) {
+    return '';
+  }
+}
+
+// Helper: Strip ANSI codes
+function stripAnsi(str: string): string {
+  // eslint-disable-next-line no-control-regex
+  return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '');
+}
+
 const SessionListView: React.FC = () => {
   const { desktopId } = useParams<{ desktopId: string }>();
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -67,7 +84,8 @@ const SessionListView: React.FC = () => {
   const decodePreview = (b64?: string) => {
     if (!b64) return '';
     try {
-      return atob(b64);
+      const decoded = b64_to_utf8(b64);
+      return stripAnsi(decoded);
     } catch (e) {
       return 'Invalid preview data';
     }
