@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Terminal, Smartphone, Chrome } from 'lucide-react';
+import { Terminal, Smartphone, Chrome, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { useAuthStore } from '../store/useStore';
@@ -7,6 +7,7 @@ import { useAuthStore } from '../store/useStore';
 const LoginView: React.FC = () => {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [countryCode, setCountryCode] = useState('+86');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   
@@ -20,8 +21,22 @@ const LoginView: React.FC = () => {
     setIsLoading(true);
     setError('');
 
+    // Auto-format phone number for login
+    let finalIdentifier = identifier;
+    const isEmail = identifier.includes('@');
+    // Simple check: if not email and looks like a phone number (digits), add country code
+    // Note: Usernames can also be just text, so we need to be careful.
+    // However, typical usernames don't start with digits usually, but they can.
+    // Strategy: If selected country code is visible (meaning not email), try to prefix if it looks like a phone.
+    // A safer bet for Login is: if it's purely digits and length > 6, assume phone.
+    const isPhone = !isEmail && /^\d+$/.test(identifier);
+    
+    if (isPhone) {
+       finalIdentifier = `${countryCode}${identifier}`;
+    }
+
     try {
-      const data = await api.auth.login(identifier, password);
+      const data = await api.auth.login(finalIdentifier, password);
       setAuth(data.user, data.access_token);
       localStorage.setItem('token', data.access_token);
       navigate('/');
@@ -69,13 +84,33 @@ const LoginView: React.FC = () => {
         {/* Login Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-4">
-            <input
-              type="text"
-              placeholder="Username, Email or Phone"
-              value={identifier}
-              onChange={(e) => setIdentifier(e.target.value)}
-              className="w-full bg-black border border-slate-700 rounded-md px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
-            />
+             {/* Identifier Input with Country Code */}
+             <div className="flex bg-black border border-slate-700 rounded-md focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition-all overflow-hidden">
+              {!identifier.includes('@') && /^\d*$/.test(identifier) && identifier.length > 0 && (
+                <div className="flex items-center border-r border-slate-700 bg-slate-900/30">
+                  <select 
+                    value={countryCode}
+                    onChange={(e) => setCountryCode(e.target.value)}
+                    className="h-full bg-transparent text-slate-300 text-sm pl-3 pr-8 appearance-none outline-none cursor-pointer hover:text-white transition-colors py-3"
+                    style={{ backgroundImage: 'none' }}
+                  >
+                    <option value="+86">🇨🇳 +86</option>
+                    <option value="+1">🇺🇸 +1</option>
+                    <option value="+44">🇬🇧 +44</option>
+                    <option value="+81">🇯🇵 +81</option>
+                  </select>
+                  <ChevronDown size={14} className="text-slate-500 absolute left-[4.5rem] pointer-events-none" />
+                </div>
+              )}
+              <input
+                type="text"
+                placeholder="Username, Email or Phone"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                className="flex-1 bg-transparent px-4 py-3 text-white placeholder-slate-500 outline-none border-none min-w-0"
+              />
+            </div>
+
             <input
               type="password"
               placeholder="Password"

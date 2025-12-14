@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Terminal, ArrowLeft } from 'lucide-react';
+import { Terminal, ArrowLeft, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { useAuthStore } from '../store/useStore';
@@ -8,15 +8,29 @@ const RegisterView: React.FC = () => {
   const [username, setUsername] = useState('');
   const [contact, setContact] = useState(''); // Email or Phone
   const [password, setPassword] = useState('');
+  const [countryCode, setCountryCode] = useState('+86');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
   const navigate = useNavigate();
   const setAuth = useAuthStore((state) => state.setAuth);
 
+  // Validation Patterns
+  const usernamePattern = /^[a-zA-Z0-9_]{3,20}$/;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username || !contact || !password) return;
+
+    // Frontend Validation
+    if (!usernamePattern.test(username)) {
+      setError('Username must be 3-20 chars (letters, numbers, underscore only)');
+      return;
+    }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
 
     setIsLoading(true);
     setError('');
@@ -24,7 +38,10 @@ const RegisterView: React.FC = () => {
     // Simple email detection
     const isEmail = contact.includes('@');
     const email = isEmail ? contact : undefined;
-    const phone = !isEmail ? contact : undefined;
+    
+    // For phone, combine country code and contact (remove any user-entered spaces/dashes)
+    const cleanContact = contact.replace(/[\s-]/g, '');
+    const phone = !isEmail ? `${countryCode}${cleanContact}` : undefined;
 
     try {
       const data = await api.auth.register(username, password, email, phone);
@@ -32,7 +49,15 @@ const RegisterView: React.FC = () => {
       localStorage.setItem('token', data.access_token);
       navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Registration failed');
+      console.error(err);
+      // Improve error message display
+      let msg = err.response?.data?.message || 'Registration failed';
+      if (msg.includes("'Phone' failed")) {
+        msg = 'Invalid phone number format';
+      } else if (msg.includes("Username")) {
+        msg = 'Username already exists or invalid';
+      }
+      setError(msg);
     } finally {
       setIsLoading(false);
     }
@@ -70,31 +95,50 @@ const RegisterView: React.FC = () => {
             <div className="relative group">
                <input
                 type="text"
-                placeholder="Username"
+                placeholder="Username (3-20 chars)"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full bg-black border border-slate-700 rounded-md px-4 py-4 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all peer"
               />
             </div>
 
-            <input
-              type="text"
-              placeholder="Phone or Email"
-              value={contact}
-              onChange={(e) => setContact(e.target.value)}
-              className="w-full bg-black border border-slate-700 rounded-md px-4 py-4 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
-            />
+            {/* Phone/Email Input with Country Code Selector */}
+            <div className="flex bg-black border border-slate-700 rounded-md focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition-all overflow-hidden">
+              {!contact.includes('@') && (
+                <div className="flex items-center border-r border-slate-700 bg-slate-900/30">
+                  <select 
+                    value={countryCode}
+                    onChange={(e) => setCountryCode(e.target.value)}
+                    className="h-full bg-transparent text-slate-300 text-sm pl-3 pr-8 appearance-none outline-none cursor-pointer hover:text-white transition-colors py-4"
+                    style={{ backgroundImage: 'none' }}
+                  >
+                    <option value="+86">🇨🇳 +86</option>
+                    <option value="+1">🇺🇸 +1</option>
+                    <option value="+44">🇬🇧 +44</option>
+                    <option value="+81">🇯🇵 +81</option>
+                  </select>
+                  <ChevronDown size={14} className="text-slate-500 absolute left-[4.5rem] pointer-events-none" />
+                </div>
+              )}
+              <input
+                type="text"
+                placeholder="Phone number or Email"
+                value={contact}
+                onChange={(e) => setContact(e.target.value)}
+                className="flex-1 bg-transparent px-4 py-4 text-white placeholder-slate-500 outline-none border-none min-w-0"
+              />
+            </div>
             
             <input
               type="password"
-              placeholder="Password"
+              placeholder="Password (min 6 chars)"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full bg-black border border-slate-700 rounded-md px-4 py-4 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
             />
           </div>
 
-          {error && <p className="text-red-500 text-sm">{error}</p>}
+          {error && <p className="text-red-500 text-sm px-1">{error}</p>}
 
           <button
             type="submit"
