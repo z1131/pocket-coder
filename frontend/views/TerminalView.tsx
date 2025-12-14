@@ -86,7 +86,20 @@ const TerminalView: React.FC = () => {
 
   // 2. Init Xterm & WebSocket
   useEffect(() => {
-    if (!token || !sessionId || !terminalRef.current) return;
+    console.log('[TerminalView] useEffect#2 (init ws) called:', {
+      token: !!token,
+      sessionId,
+      terminalRef: !!terminalRef.current
+    });
+    if (!token || !sessionId || !terminalRef.current) {
+      console.log('[TerminalView] useEffect#2 early return - missing:', {
+        token: !token ? 'token' : null,
+        sessionId: !sessionId ? 'sessionId' : null,
+        terminalRef: !terminalRef.current ? 'terminalRef' : null
+      });
+      return;
+    }
+    console.log('[TerminalView] useEffect#2 proceeding to init terminal and ws');
 
     // Init Terminal
     const term = new Terminal({
