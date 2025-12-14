@@ -21,9 +21,13 @@ function b64_to_utf8(str: string): string {
 
 // Helper: Strip ANSI codes
 function stripAnsi(str: string): string {
-  // Enhanced ANSI regex covering CSI and OSC sequences
+  // 1. Remove specific OSC 7 file URI sequences that might be truncated or malformed
+  // Pattern matches "]7;file://" until a bell character (\u0007) or end of common path chars
+  let clean = str.replace(/]7;file:\/\/[^\u0007]*[\u0007]?/g, '');
+
+  // 2. Enhanced ANSI regex covering CSI and OSC sequences
   // eslint-disable-next-line no-control-regex
-  return str.replace(/[\u001b\u009b][[\]()#;?]*(?:(?:(?:;[-a-zA-Z\d/#&.:=?%@~_]+)*|[a-zA-Z\d]+(?:;[-a-zA-Z\d/#&.:=?%@~_]*)*)?\u0007|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]))/g, '');
+  return clean.replace(/[\u001b\u009b][[\]()#;?]*(?:(?:(?:;[-a-zA-Z\d/#&.:=?%@~_]+)*|[a-zA-Z\d]+(?:;[-a-zA-Z\d/#&.:=?%@~_]*)*)?\u0007|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]))/g, '');
 }
 
 const SessionListView: React.FC = () => {
@@ -86,7 +90,8 @@ const SessionListView: React.FC = () => {
     if (!b64) return '';
     try {
       const decoded = b64_to_utf8(b64);
-      return stripAnsi(decoded);
+      // Strip ANSI first, then remove leading prompts (%, $, #) and whitespace
+      return stripAnsi(decoded).replace(/^\s*[%$#]\s+/, '').trim();
     } catch (e) {
       return 'Invalid preview data';
     }
