@@ -22,7 +22,7 @@ function b64_to_utf8(str: string): string {
 // Helper: Strip ANSI codes
 function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
-  return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '');
+  return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
 }
 
 const SessionListView: React.FC = () => {
