@@ -1,33 +1,58 @@
 services:
-  # Go 服务端 (使用阿里云 MySQL 和 Redis)
+  # Nginx Gateway - 唯一的公网入口
+  nginx-gateway:
+    image: nginx:alpine
+    container_name: pocket-coder-gateway
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # 挂载自定义 Nginx 配置
+      - ./nginx-gateway.conf:/etc/nginx/conf.d/default.conf
+      # 挂载 SSL 证书 (注意：这里假设在服务器上运行时的路径)
+      # 在本地开发时可能需要注释掉或指向本地证书
+      - /etc/nginx/certs:/etc/nginx/certs
+    depends_on:
+      - frontend
+      - server
+    networks:
+      - pocket-coder-net
+    restart: unless-stopped
+
+  # 前端服务
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pocket-coder-frontend
+    networks:
+      - pocket-coder-net
+    restart: unless-stopped
+
+  # 后端服务
   server:
     build:
       context: ./server
       dockerfile: Dockerfile
     container_name: pocket-coder-server
-    ports:
-      - "8080:8080"
     environment:
-      # 服务器配置
-      - SERVER_PORT=8080
-      - SERVER_MODE=release
-      # 阿里云 MySQL RDS (公网地址)
-      - MYSQL_HOST=rm-bp1tbjfarup52kbpbao.mysql.rds.aliyuncs.com
-      - MYSQL_PORT=3306
-      - MYSQL_USERNAME=pocket_coder
-      - MYSQL_PASSWORD=Aa1231231212123
-      - MYSQL_DATABASE=pocket_coder
-      # 阿里云 Redis
-      - REDIS_HOST=r-bp1vv94ogy8k2a1e5jpd.redis.rds.aliyuncs.com
-      - REDIS_PORT=6379
-      - REDIS_USERNAME=pocket_coder
-      - REDIS_PASSWORD=Aa1231231212123
-      # JWT 配置
-      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
-      # AI 配置
-      - QWEN_API_KEY=sk-507581749f3147e5b360cb7f9d2198ef
+      - SERVER_PORT=${SERVER_PORT}
+      - SERVER_MODE=${SERVER_MODE}
+      - MYSQL_HOST=${MYSQL_HOST}
+      - MYSQL_PORT=${MYSQL_PORT}
+      - MYSQL_USERNAME=${MYSQL_USERNAME}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_USERNAME=${REDIS_USERNAME}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - QWEN_API_KEY=${QWEN_API_KEY}
+    networks:
+      - pocket-coder-net
     restart: unless-stopped
 
 networks:
-  default:
+  pocket-coder-net:
     driver: bridge

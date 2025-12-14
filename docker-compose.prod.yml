@@ -1,0 +1,36 @@
+services:
+  nginx-gateway:
+    image: nginx:alpine
+    container_name: pocket-coder-gateway
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx-gateway.conf:/etc/nginx/conf.d/default.conf
+      - /etc/nginx/certs:/etc/nginx/certs
+    depends_on:
+      - frontend
+      - server
+    networks:
+      - pocket-coder-net
+    restart: unless-stopped
+
+  frontend:
+    image: registry.cn-hangzhou.aliyuncs.com/pocket_coder/frontend:latest
+    container_name: pocket-coder-frontend
+    networks:
+      - pocket-coder-net
+    restart: unless-stopped
+
+  server:
+    image: registry.cn-hangzhou.aliyuncs.com/pocket_coder/server:latest
+    container_name: pocket-coder-server
+    env_file:
+      - .env
+    networks:
+      - pocket-coder-net
+    restart: unless-stopped
+
+networks:
+  pocket-coder-net:
+    driver: bridge
