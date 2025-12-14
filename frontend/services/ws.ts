@@ -116,6 +116,13 @@ class WSClient {
       this.handlers.set(type, new Set());
     }
     this.handlers.get(type)!.add(handler);
+
+    // 关键修复：如果注册 'open' handler 时连接已经是 OPEN 状态，立即调用 handler
+    if (type === 'open' && this.ws && this.ws.readyState === WebSocket.OPEN) {
+      console.log('[WS DEBUG] on("open") registered while already connected, calling handler immediately');
+      handler(null);
+    }
+
     return () => this.off(type, handler);
   }
 
