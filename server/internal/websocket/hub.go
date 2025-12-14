@@ -104,6 +104,25 @@ func (h *Hub) registerClient(client *Client) {
 		} else {
 			// PID 相同，视为断网重连，保持会话
 			log.Printf("Process ID matched (%s), resuming session...", client.processID)
+
+			// 恢复所有活跃会话（包括后台会话）
+			go func() {
+				ctx := context.Background()
+				activeSessions, err := h.sessionService.ListActiveSessions(ctx, client.desktopID)
+				if err != nil {
+					log.Printf("Failed to list active sessions: %v", err)
+					return
+				}
+				for _, sess := range activeSessions {
+					// 重新发送创建指令，让 CLI 恢复 PTY 进程
+					// 注意：如果是默认会话，下面的 EnsureDefaultSession 也会发一次，但 CLI 端有防重检查，所以无害
+					client.SendMessage(NewMessage(TypeSessionCreate, &SessionCreatePayload{
+						SessionID:  sess.ID,
+						IsDefault:  sess.IsDefault,
+						WorkingDir: "",
+					}))
+				}
+			}()
 		}
 
 		if shouldReset {

@@ -215,6 +215,19 @@ func (s *SessionService) GetActiveSession(ctx context.Context, userID, desktopID
 	return s.toSessionResponse(session), nil
 }
 
+// ListActiveSessions 获取设备的所有活跃会话（用于 CLI 重连恢复）
+func (s *SessionService) ListActiveSessions(ctx context.Context, desktopID int64) ([]*model.Session, error) {
+	sessions, err := s.sessionRepo.GetAllActiveByDesktopID(ctx, desktopID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*model.Session, len(sessions))
+	for i := range sessions {
+		result[i] = &sessions[i]
+	}
+	return result, nil
+}
+
 // EndSession 结束会话 (软删除 + 通知关闭 + 归档日志)
 func (s *SessionService) EndSession(ctx context.Context, userID, sessionID int64) error {
 	session, err := s.sessionRepo.GetByIDWithDesktop(ctx, sessionID)

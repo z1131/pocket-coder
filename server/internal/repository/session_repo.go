@@ -198,6 +198,15 @@ func (r *SessionRepository) GetActiveDefaultSessionByDesktopID(ctx context.Conte
 	return &session, nil
 }
 
+// GetAllActiveByDesktopID 获取设备的所有活跃会话
+func (r *SessionRepository) GetAllActiveByDesktopID(ctx context.Context, desktopID int64) ([]model.Session, error) {
+	var sessions []model.Session
+	err := r.db.WithContext(ctx).
+		Where("desktop_id = ? AND status = ?", desktopID, model.SessionStatusActive).
+		Find(&sessions).Error
+	return sessions, err
+}
+
 // Update 更新会话信息
 // 参数:
 //   - ctx: 上下文
