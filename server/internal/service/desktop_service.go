@@ -213,6 +213,18 @@ func (s *DesktopService) GetDesktop(ctx context.Context, userID, desktopID int64
 
 	// 3. 从 Redis 获取实时状态
 	isOnline := s.cache.IsDesktopOnline(ctx, desktopID)
+	
+	// Fallback: 如果全局表说离线，再查查用户表（解决 Redis 数据不一致问题）
+	if !isOnline {
+		userOnlineIDs, _ := s.cache.GetUserOnlineDesktops(ctx, userID)
+		for _, id := range userOnlineIDs {
+			if id == desktopID {
+				isOnline = true
+				break
+			}
+		}
+	}
+
 	status := model.DesktopStatusOffline
 	if isOnline {
 		status = model.DesktopStatusOnline
