@@ -29,6 +29,7 @@ function b64_to_utf8(str: string): string {
 const TerminalView: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [session, setSession] = useState<Session | null>(null);
+  const sessionRef = useRef<Session | null>(null);
   
   // Connection States
   const [isWsConnected, setIsWsConnected] = useState(false); // Mobile <-> Server
@@ -58,6 +59,7 @@ const TerminalView: React.FC = () => {
       .then(res => {
         console.log('[TerminalView] Session loaded successfully:', res);
         setSession(res);
+        sessionRef.current = res;
         // Fetch desktop info to get name and initial status
         if (res.desktop_id) {
             console.log('[TerminalView] Fetching desktop info for ID:', res.desktop_id);
@@ -114,14 +116,6 @@ const TerminalView: React.FC = () => {
       
       // Request history
       ws.send('terminal:history', { session_id: Number(sessionId) });
-      
-      // Send resize
-      ws.send('terminal:resize', { 
-        session_id: Number(sessionId),
-        desktop_id: session.desktop_id,
-        cols: term.cols, 
-        rows: term.rows 
-      });
     });
 
     const offClose = ws.on('close', () => {
@@ -150,14 +144,16 @@ const TerminalView: React.FC = () => {
     });
 
     const offOffline = ws.on('desktop:offline', (payload: any) => {
-      if (session && payload.desktop_id === session.desktop_id) {
+      const current = sessionRef.current;
+      if (current && payload.desktop_id === current.desktop_id) {
           term.write('\x1b[31m\r\n[Desktop Disconnected]\x1b[0m\r\n');
           setIsDesktopOnline(false);
       }
     });
 
     const offOnline = ws.on('desktop:online', (payload: any) => {
-      if (session && payload.desktop_id === session.desktop_id) {
+      const current = sessionRef.current;
+      if (current && payload.desktop_id === current.desktop_id) {
            term.write('\x1b[32m\r\n[Desktop Reconnected]\x1b[0m\r\n');
            setIsDesktopOnline(true);
       }
@@ -166,22 +162,26 @@ const TerminalView: React.FC = () => {
     // Terminal Input
     term.onData((data) => {
       if (!ws) return;
-      // Encode Base64 with UTF-8 support
-      const encoded = utf8_to_b64(data);
-      ws.send('terminal:input', {
-        session_id: Number(sessionId),
-        desktop_id: session.desktop_id,
-        data: encoded,
-      });
+      const current = sessionRef.current;
+      if (current) {
+        // Encode Base64 with UTF-8 support
+        const encoded = utf8_to_b64(data);
+        ws.send('terminal:input', {
+            session_id: Number(sessionId),
+            desktop_id: current.desktop_id,
+            data: encoded,
+        });
+      }
     });
 
     // Resize Observer
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
-      if (ws) {
+      const current = sessionRef.current;
+      if (ws && current) {
         ws.send('terminal:resize', {
           session_id: Number(sessionId),
-          desktop_id: session.desktop_id,
+          desktop_id: current.desktop_id,
           cols: term.cols, 
           rows: term.rows 
         });
@@ -200,7 +200,20 @@ const TerminalView: React.FC = () => {
       term.dispose();
       ws.disconnect();
     };
-  }, [token, sessionId, session]);
+  }, [token, sessionId]);
+
+  // 3. Sync Resize when session is ready
+  useEffect(() => {
+      if (session && isWsConnected && xtermRef.current) {
+          const term = xtermRef.current;
+          ws.send('terminal:resize', { 
+            session_id: Number(sessionId),
+            desktop_id: session.desktop_id,
+            cols: term.cols, 
+            rows: term.rows 
+          });
+      }
+  }, [session, isWsConnected, sessionId]);
 
   // Handle Input Change (for Sticky Keys)
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
