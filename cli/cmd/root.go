@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -211,6 +212,15 @@ func startWebSocket() {
 	// 设置消息处理
 	setupHandlers(wsClient, sessMgr)
 
+	// 监听断开重连
+	reconnectChan := make(chan struct{}, 1)
+	wsClient.OnClose(func() {
+		select {
+		case reconnectChan <- struct{}{}:
+		default:
+		}
+	})
+
 	// 连接服务器
 	if err := wsClient.Connect(); err != nil {
 		fmt.Fprintf(os.Stderr, "✗ 连接服务器失败: %v\n", err)
@@ -273,9 +283,49 @@ func startWebSocket() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	select {
-	case <-sigChan:
-	case <-done:
+	// 主事件循环
+	loop:
+	for {
+		select {
+		case <-sigChan:
+			break loop
+		case <-done:
+			break loop
+		case <-reconnectChan:
+			// 连接断开，尝试重连
+			// 暂时恢复终端状态以便打印日志
+			term.Restore(int(os.Stdin.Fd()), oldState)
+			fmt.Println("\r\n⚠️  连接断开，3秒后尝试重连...")
+			
+			// 重试循环
+			for {
+				time.Sleep(3 * time.Second)
+				
+				// 检查是否已退出
+				select {
+				case <-sigChan:
+					break loop
+				case <-done:
+					break loop
+				default:
+				}
+
+				fmt.Print("🔄 正在重连... ")
+				if err := wsClient.Connect(); err != nil {
+					fmt.Printf("失败: %v\n", err)
+				} else {
+					fmt.Println("成功！")
+					// 恢复 Raw Mode
+					term.MakeRaw(int(os.Stdin.Fd()))
+					
+					// 发送 Resize 以同步状态
+					if width, height, err := term.GetSize(int(os.Stdin.Fd())); err == nil {
+						sessMgr.Resize(0, uint16(height), uint16(width))
+					}
+					break // 重连成功，回到主循环
+				}
+			}
+		}
 	}
 
 	// 恢复终端状态
