@@ -45,7 +45,7 @@ func (m *Manager) HandleSessionCreate(sessionID int64, workingDir string, isDefa
 	// 如果 Server 指定这是默认会话
 	if isDefault {
 		m.mainSessionID = sessionID
-		fmt.Printf("\r\n🔗 默认终端会话 #%d 已连接\r\n", sessionID)
+		fmt.Println("\r\n🔗 终端会话 已连接")
 	}
 
 	// 设置输出处理
