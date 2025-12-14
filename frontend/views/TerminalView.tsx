@@ -30,19 +30,19 @@ const TerminalView: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [session, setSession] = useState<Session | null>(null);
   const sessionRef = useRef<Session | null>(null);
-  
+
   // Connection States
   const [isWsConnected, setIsWsConnected] = useState(false); // Mobile <-> Server
   const [isDesktopOnline, setIsDesktopOnline] = useState(false); // Desktop <-> Server
   const [desktopName, setDesktopName] = useState('');
-  
+
   // Computed final status for UI
   const isConnected = isWsConnected && isDesktopOnline;
 
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [activeModifier, setActiveModifier] = useState<string | null>(null);
-  
+
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -51,13 +51,13 @@ const TerminalView: React.FC = () => {
 
   // Debug State
   useEffect(() => {
-      console.log('[TerminalView v2] Connection State:', { isWsConnected, isDesktopOnline, isConnected });
+      console.log('[TerminalView v3] Connection State:', { isWsConnected, isDesktopOnline, isConnected });
   }, [isWsConnected, isDesktopOnline]);
 
   // 1. Load Session & Desktop Info
   useEffect(() => {
     if (!sessionId) return;
-    
+
     console.log('[TerminalView] Fetching session details for ID:', sessionId);
 
     api.session.get(Number(sessionId))
@@ -84,22 +84,63 @@ const TerminalView: React.FC = () => {
       });
   }, [sessionId]);
 
-  // 2. Init Xterm & WebSocket
+  // 2. WebSocket 连接和状态事件 (独立于 terminal，不依赖 terminalRef)
   useEffect(() => {
-    console.log('[TerminalView] useEffect#2 (init ws) called:', {
-      token: !!token,
-      sessionId,
-      terminalRef: !!terminalRef.current
+    if (!token || !sessionId) return;
+
+    console.log('[TerminalView] useEffect#2 (ws connect) - connecting...');
+
+    // Connect WebSocket
+    ws.connect(token);
+
+    // 状态事件处理
+    const offOpen = ws.on('open', () => {
+      console.log('[TerminalView] ws.on("open") handler called');
+      setIsWsConnected(true);
     });
-    if (!token || !sessionId || !terminalRef.current) {
-      console.log('[TerminalView] useEffect#2 early return - missing:', {
+
+    const offClose = ws.on('close', () => {
+      console.log('[TerminalView] ws.on("close") handler called');
+      setIsWsConnected(false);
+    });
+
+    const offOffline = ws.on('desktop:offline', (payload: any) => {
+      const current = sessionRef.current;
+      if (current && payload.desktop_id === current.desktop_id) {
+          setIsDesktopOnline(false);
+      }
+    });
+
+    const offOnline = ws.on('desktop:online', (payload: any) => {
+      const current = sessionRef.current;
+      if (current && payload.desktop_id === current.desktop_id) {
+           setIsDesktopOnline(true);
+      }
+    });
+
+    return () => {
+      console.log('[TerminalView] useEffect#2 cleanup - disconnecting ws');
+      offOpen();
+      offClose();
+      offOffline();
+      offOnline();
+      ws.disconnect();
+    };
+  }, [token, sessionId]);
+
+  // 3. Init Xterm & Terminal 相关事件 (依赖 session 加载完成)
+  useEffect(() => {
+    if (!token || !sessionId || !session || !terminalRef.current) {
+      console.log('[TerminalView] useEffect#3 (init terminal) - waiting for:', {
         token: !token ? 'token' : null,
         sessionId: !sessionId ? 'sessionId' : null,
+        session: !session ? 'session' : null,
         terminalRef: !terminalRef.current ? 'terminalRef' : null
       });
       return;
     }
-    console.log('[TerminalView] useEffect#2 proceeding to init terminal and ws');
+
+    console.log('[TerminalView] useEffect#3 - initializing terminal');
 
     // Init Terminal
     const term = new Terminal({
@@ -115,7 +156,7 @@ const TerminalView: React.FC = () => {
 
     const fitAddon = new FitAddon();
     const webLinksAddon = new WebLinksAddon();
-    
+
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
     term.open(terminalRef.current);
@@ -124,23 +165,13 @@ const TerminalView: React.FC = () => {
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    // Connect WebSocket
-    ws.connect(token);
-
-    // WS Event Handlers
-    const offOpen = ws.on('open', () => {
-      setIsWsConnected(true);
-      term.write('\x1b[32m\r\n[Connected to Server]\x1b[0m\r\n');
-      
-      // Request history
+    // 如果 WebSocket 已连接，显示状态并请求历史
+    if (isWsConnected) {
+      term.write('\x1b[32m[Connected to Server]\x1b[0m\r\n');
       ws.send('terminal:history', { session_id: Number(sessionId) });
-    });
+    }
 
-    const offClose = ws.on('close', () => {
-      setIsWsConnected(false);
-      term.write('\x1b[31m\r\n[Disconnected from Server]\x1b[0m\r\n');
-    });
-
+    // Terminal 输出事件
     const offOutput = ws.on('terminal:output', (payload: any) => {
       if (payload.session_id === Number(sessionId) && payload.data) {
         try {
@@ -151,7 +182,7 @@ const TerminalView: React.FC = () => {
         }
       }
     });
-    
+
     const offHistory = ws.on('terminal:history', (payload: any) => {
        if (payload.session_id === Number(sessionId) && payload.data) {
          try {
@@ -161,25 +192,21 @@ const TerminalView: React.FC = () => {
        }
     });
 
-    const offOffline = ws.on('desktop:offline', (payload: any) => {
-      const current = sessionRef.current;
-      if (current && payload.desktop_id === current.desktop_id) {
+    // Desktop 状态变化时在终端显示
+    const offOfflineMsg = ws.on('desktop:offline', (payload: any) => {
+      if (session && payload.desktop_id === session.desktop_id) {
           term.write('\x1b[31m\r\n[Desktop Disconnected]\x1b[0m\r\n');
-          setIsDesktopOnline(false);
       }
     });
 
-    const offOnline = ws.on('desktop:online', (payload: any) => {
-      const current = sessionRef.current;
-      if (current && payload.desktop_id === current.desktop_id) {
+    const offOnlineMsg = ws.on('desktop:online', (payload: any) => {
+      if (session && payload.desktop_id === session.desktop_id) {
            term.write('\x1b[32m\r\n[Desktop Reconnected]\x1b[0m\r\n');
-           setIsDesktopOnline(true);
       }
     });
 
     // Terminal Input
     term.onData((data) => {
-      if (!ws) return;
       const current = sessionRef.current;
       if (current) {
         // Encode Base64 with UTF-8 support
@@ -196,39 +223,37 @@ const TerminalView: React.FC = () => {
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
       const current = sessionRef.current;
-      if (ws && current) {
+      if (current) {
         ws.send('terminal:resize', {
           session_id: Number(sessionId),
           desktop_id: current.desktop_id,
-          cols: term.cols, 
-          rows: term.rows 
+          cols: term.cols,
+          rows: term.rows
         });
       }
     });
     resizeObserver.observe(terminalRef.current);
 
     return () => {
-      offOpen();
-      offClose();
+      console.log('[TerminalView] useEffect#3 cleanup - disposing terminal');
       offOutput();
       offHistory();
-      offOffline();
-      offOnline();
+      offOfflineMsg();
+      offOnlineMsg();
       resizeObserver.disconnect();
       term.dispose();
-      ws.disconnect();
     };
-  }, [token, sessionId]);
+  }, [token, sessionId, session, isWsConnected]);
 
-  // 3. Sync Resize when session is ready
+  // 4. Sync Resize when session is ready
   useEffect(() => {
       if (session && isWsConnected && xtermRef.current) {
           const term = xtermRef.current;
-          ws.send('terminal:resize', { 
+          ws.send('terminal:resize', {
             session_id: Number(sessionId),
             desktop_id: session.desktop_id,
-            cols: term.cols, 
-            rows: term.rows 
+            cols: term.cols,
+            rows: term.rows
           });
       }
   }, [session, isWsConnected, sessionId]);
@@ -236,12 +261,12 @@ const TerminalView: React.FC = () => {
   // Handle Input Change (for Sticky Keys)
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
-    
+
     // If a modifier is active and we have input
     if (activeModifier && newValue.length > 0 && session) {
       // Get the last character typed (assuming append)
       const char = newValue.slice(-1);
-      
+
       if (activeModifier === 'CTRL') {
         const code = char.toUpperCase().charCodeAt(0);
         if (code >= 64 && code <= 95) {
@@ -277,7 +302,7 @@ const TerminalView: React.FC = () => {
       setInputValue('');
       setActiveModifier(null);
       // Try to keep focus on input for continuous typing
-      // xtermRef.current?.focus(); 
+      // xtermRef.current?.focus();
     } else {
       setInputValue(newValue);
     }
@@ -287,11 +312,11 @@ const TerminalView: React.FC = () => {
   const handleQuickCommand = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputValue || !xtermRef.current || !session) return;
-    
+
     // Append newline and send
     const data = inputValue + '\r';
     const encoded = utf8_to_b64(data);
-    
+
     console.log('[TerminalView] Sending command:', JSON.stringify(data), 'Encoded:', encoded);
 
     ws.send('terminal:input', {
@@ -306,7 +331,7 @@ const TerminalView: React.FC = () => {
   // Handle Virtual Keys
   const handleVirtualKey = (key: string) => {
     if (!xtermRef.current || !session) return;
-    
+
     console.log('[TerminalView] Virtual Key pressed:', key);
 
     // Toggle Modifiers
@@ -321,7 +346,7 @@ const TerminalView: React.FC = () => {
     }
 
     let sequence = '';
-    
+
     switch (key) {
       case 'UP': sequence = '\x1b[A'; break;
       case 'DOWN': sequence = '\x1b[B'; break;
@@ -350,11 +375,11 @@ const TerminalView: React.FC = () => {
 
   return (
     <div className="h-[100dvh] w-full flex flex-col bg-slate-950 overflow-hidden font-sans fixed inset-0 z-50">
-      
+
       {/* Top Bar */}
       <header className="h-12 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-3 shrink-0 z-10 select-none">
         <div className="flex items-center gap-2">
-          <button 
+          <button
             onClick={() => navigate(`/desktops/${session.desktop_id}`)}
             className="p-1.5 hover:bg-slate-800 rounded-md text-slate-400 hover:text-white transition-colors"
           >
@@ -362,14 +387,14 @@ const TerminalView: React.FC = () => {
           </button>
           <div className="flex flex-col">
             <span className="font-semibold text-slate-200 text-sm leading-tight">
-                {session.is_default ? (desktopName || 'Terminal') : 'Background Terminal (v2)'}
+                {session.is_default ? (desktopName || 'Terminal') : 'Background Terminal (v3)'}
             </span>
             <span className="text-[10px] text-slate-500 leading-tight">
               {session.is_default ? 'Local Shell' : `Session #${session.id}`}
             </span>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-800 rounded-full border border-slate-700">
             {isConnected ? (
@@ -394,7 +419,7 @@ const TerminalView: React.FC = () => {
         <VirtualKeyboard onKeyPress={handleVirtualKey} activeModifier={activeModifier} />
 
         <div className="p-2 flex gap-2 items-center bg-slate-900/50 backdrop-blur">
-          <button 
+          <button
             onClick={() => setIsAiOpen(true)}
             className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 transition-colors"
           >
@@ -414,10 +439,10 @@ const TerminalView: React.FC = () => {
               disabled={!isConnected}
               autoComplete="off"
             />
-            <button 
+            <button
               type="submit"
               disabled={!inputValue || !isConnected}
-              className={`absolute right-1 p-1.5 rounded-md transition-all ${ 
+              className={`absolute right-1 p-1.5 rounded-md transition-all ${
                 inputValue && isConnected ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-600'
               }`}
             >
@@ -427,9 +452,9 @@ const TerminalView: React.FC = () => {
         </div>
       </footer>
 
-      <AIAssistant 
-        isOpen={isAiOpen} 
-        onClose={() => setIsAiOpen(false)} 
+      <AIAssistant
+        isOpen={isAiOpen}
+        onClose={() => setIsAiOpen(false)}
         onApplyCommand={(cmd) => {
           setInputValue(cmd);
         }}
