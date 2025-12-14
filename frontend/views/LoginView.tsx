@@ -44,7 +44,7 @@ const LoginView: React.FC = () => {
         </div>
 
         <div className="space-y-2 text-center">
-          <h1 className="text-3xl font-bold tracking-tight text-white">Sign in to CloudTerm</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-white">Sign in to Pocket Coder</h1>
           <p className="text-slate-500">Manage your infrastructure from anywhere</p>
         </div>
 

@@ -19,6 +19,6 @@ export const MOCK_BOOT_SEQUENCE = [
   "Authenticating user (mock_user)...",
   "Establishing secure channel...",
   "Connection established.",
-  "Welcome to CloudTerm v1.0.2",
+  "Welcome to Pocket Coder v1.0.2",
   "Type 'help' for available commands."
 ];
