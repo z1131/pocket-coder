@@ -78,6 +78,9 @@ jobs:
             
             # 重启服务
             docker-compose up -d
+
+            # 强制重启 Gateway 以刷新 DNS 缓存
+            docker-compose restart nginx-gateway
             
             # 清理无用镜像
             docker image prune -f
