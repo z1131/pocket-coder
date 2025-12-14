@@ -46,7 +46,6 @@ const TerminalView: React.FC = () => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const sessionRef = useRef<Session | null>(null);
   const navigate = useNavigate();
   const { token } = useAuthStore();
 
