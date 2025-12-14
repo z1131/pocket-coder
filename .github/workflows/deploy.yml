@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  REGISTRY: registry.cn-hangzhou.aliyuncs.com
+  REGISTRY: crpi-16uyo5eg9cykcl2r.cn-hangzhou.personal.cr.aliyuncs.com
   NAMESPACE: pocket_coder
   FRONTEND_IMAGE: frontend
   SERVER_IMAGE: server
