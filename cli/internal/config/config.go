@@ -60,8 +60,8 @@ func Init() error {
 	viper.SetConfigType("yaml")
 
 	// 设置默认值
-	viper.SetDefault("server.url", "http://localhost:8080")
-	viper.SetDefault("server.ws_url", "ws://localhost:8080")
+	viper.SetDefault("server.url", "https://deepknow.online")
+	viper.SetDefault("server.ws_url", "wss://deepknow.online")
 	viper.SetDefault("device.access_token", "")
 	viper.SetDefault("device.refresh_token", "")
 	viper.SetDefault("device.desktop_token", "")
