@@ -46,8 +46,14 @@ const TerminalView: React.FC = () => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const sessionRef = useRef<Session | null>(null);
   const navigate = useNavigate();
   const { token } = useAuthStore();
+
+  // Debug State
+  useEffect(() => {
+      console.log('[TerminalView v2] Connection State:', { isWsConnected, isDesktopOnline, isConnected });
+  }, [isWsConnected, isDesktopOnline]);
 
   // 1. Load Session & Desktop Info
   useEffect(() => {
@@ -344,7 +350,7 @@ const TerminalView: React.FC = () => {
           </button>
           <div className="flex flex-col">
             <span className="font-semibold text-slate-200 text-sm leading-tight">
-                {session.is_default ? (desktopName || 'Terminal') : 'Background Terminal'}
+                {session.is_default ? (desktopName || 'Terminal') : 'Background Terminal (v2)'}
             </span>
             <span className="text-[10px] text-slate-500 leading-tight">
               {session.is_default ? 'Local Shell' : `Session #${session.id}`}
