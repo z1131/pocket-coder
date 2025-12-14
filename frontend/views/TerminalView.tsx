@@ -331,7 +331,7 @@ const TerminalView: React.FC = () => {
           </button>
           <div className="flex flex-col">
             <span className="font-semibold text-slate-200 text-sm leading-tight">
-                {session.is_default ? (desktopName || 'Terminal') : (session.agent_type || 'Session')}
+                {session.is_default ? (desktopName || 'Terminal') : 'Background Terminal'}
             </span>
             <span className="text-[10px] text-slate-500 leading-tight">
               {session.is_default ? 'Local Shell' : `Session #${session.id}`}

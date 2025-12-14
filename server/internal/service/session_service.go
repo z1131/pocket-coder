@@ -55,7 +55,7 @@ func (s *SessionService) SetNotifier(n SessionNotifier) {
 type SessionResponse struct {
 	ID        int64   `json:"id"`
 	DesktopID int64   `json:"desktop_id"`
-	AgentType string  `json:"agent_type"`
+	ProcessID string  `json:"process_id"`
 	IsDefault bool    `json:"is_default"` // 是否为默认会话
 	WorkingDir *string `json:"working_dir,omitempty"`
 	Title     *string `json:"title,omitempty"`
@@ -97,9 +97,12 @@ func (s *SessionService) CreateSession(ctx context.Context, userID, desktopID in
 		isDefault = *req.IsDefault
 	}
 
+	// 获取当前 CLI 的 ProcessID
+	processID, _ := s.cache.GetDesktopProcessID(ctx, desktopID)
+
 	session := &model.Session{
 		DesktopID: desktopID,
-		AgentType: "claude-code", // 默认值，后续可由 Client 指定
+		ProcessID: processID,
 		Status:    model.SessionStatusActive,
 		IsDefault: isDefault,
 	}
@@ -287,7 +290,7 @@ func (s *SessionService) toSessionResponse(session *model.Session) *SessionRespo
 	resp := &SessionResponse{
 		ID:        session.ID,
 		DesktopID: session.DesktopID,
-		AgentType: session.AgentType,
+		ProcessID: session.ProcessID,
 		IsDefault: session.IsDefault, // 使用 IsDefault
 		WorkingDir: session.WorkingDir,
 		Title:     session.Title,

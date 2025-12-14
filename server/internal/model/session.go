@@ -22,9 +22,9 @@ type Session struct {
 	// DesktopID 所属设备ID，外键关联 desktops.id
 	DesktopID int64 `gorm:"index;not null" json:"desktop_id"`
 
-	// AgentType 使用的 AI 工具类型
-	// 记录创建会话时使用的工具，因为设备可能切换工具
-	AgentType string `gorm:"size:50;not null" json:"agent_type"`
+	// ProcessID 创建该会话的 CLI 进程 ID
+	// 用于区分不同生命周期的 CLI 实例
+	ProcessID string `gorm:"size:64;index" json:"process_id"`
 
 	// WorkingDir 会话的工作目录
 	// 创建会话时的项目路径

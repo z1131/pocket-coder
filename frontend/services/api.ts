@@ -70,7 +70,7 @@ export interface Device {
 export interface Session {
   id: number;
   desktop_id: number;
-  agent_type: string;
+  process_id?: string;
   is_default: boolean;
   preview?: string; // Base64
   status: 'active' | 'ended';
