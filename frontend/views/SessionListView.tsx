@@ -21,8 +21,9 @@ function b64_to_utf8(str: string): string {
 
 // Helper: Strip ANSI codes
 function stripAnsi(str: string): string {
+  // Enhanced ANSI regex covering CSI and OSC sequences
   // eslint-disable-next-line no-control-regex
-  return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+  return str.replace(/[\u001b\u009b][[\]()#;?]*(?:(?:(?:;[-a-zA-Z\d/#&.:=?%@~_]+)*|[a-zA-Z\d]+(?:;[-a-zA-Z\d/#&.:=?%@~_]*)*)?\u0007|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]))/g, '');
 }
 
 const SessionListView: React.FC = () => {
